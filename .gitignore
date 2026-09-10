@@ -22,6 +22,7 @@ dist/
 
 # ---- 项目数据（本地缓存 / 索引 / 检查点，不入库）----
 data/cache/
+data/index/
 data/chroma_smoke/
 *.db
 *.sqlite

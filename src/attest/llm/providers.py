@@ -9,8 +9,9 @@ Provider 只负责"拿回文本和用量"，**不负责记账**——记账是�
 
 from __future__ import annotations
 
+import hashlib
 import json
-import random
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -19,11 +20,18 @@ from typing import Any, Protocol, Sequence
 import httpx
 
 from ..logging import get_logger
-from ..retrieval.citations import parse_evidence_block
+from ..retrieval.citations import (
+    parse_conflicts_block,
+    parse_evidence_block,
+    parse_pairs_block,
+)
 from ..trace.events import estimate_tokens
 from .prompts import parse_objective, parse_outline, parse_subqs
 
 log = get_logger(__name__)
+
+#: 离线伪向量维度。真实语义向量用 text-embedding-v4（百炼，需 key）。
+MOCK_EMBED_DIM = 256
 
 
 @dataclass
@@ -84,6 +92,10 @@ class MockProvider:
 
     name = "mock"
 
+    def __init__(self, settings: Any = None) -> None:
+        # 冲突判定的数值倍数门槛与配置同源：配置是唯一真值来源，避免两处硬编码漂移
+        self._min_ratio = float(getattr(settings, "conflict_min_ratio", 1.5) or 1.5)
+
     def chat(
         self,
         messages: Sequence[dict[str, str]],
@@ -107,12 +119,13 @@ class MockProvider:
         )
 
     def embed(self, texts: Sequence[str], *, model: str, timeout: float = 60.0) -> list[list[float]]:
-        # 确定性伪向量（仅用于打通链路；真实维度请用 text-embedding-v4）
-        out: list[list[float]] = []
-        for t in texts:
-            rng = random.Random(hash(t) & 0xFFFFFFFF)
-            out.append([round(rng.uniform(-1, 1), 6) for _ in range(64)])
-        return out
+        """离线 embedding = CJK bigram 哈希词袋，L2 归一化，**维度固定 256**。
+
+        ⚠️ 这是**词法**向量（相似度≈字面重叠），不是语义向量。它足够支撑混合检索/RRF/
+        聚类这些工程路径的离线验证，但**不能**替代 text-embedding-v4 的语义召回能力。
+        真实语义向量需 `ATTEST_LLM_MODE=dashscope` + DASHSCOPE_API_KEY。
+        """
+        return [_hashing_embed(t) for t in texts]
 
     # ---------------- 各任务脚本 ----------------
 
@@ -169,10 +182,17 @@ class MockProvider:
             content = rec.get("content", "")
             title = rec.get("title", "")
             covered.add(sq)
-            # 相关度：子问题里的实词是否出现在证据中
-            toks = [t for t in re.split(r"[——/、，,与和的\s]+", sq) if len(t) >= 1]
-            hit = sum(1 for t in toks if t and (t in content or t in title))
-            relevance = min(5, 2 + hit) if hit else 2
+            toks = [t for t in re.split(r"[——/、，,与和的\s]+", sq) if len(t) >= 2]
+            tail = _distinctive_tokens(sq)
+            # 只共享"主题词"不算相关：必须命中子问题的**区别性部分**（`——` 之后那段）。
+            # 实测教训（eval M4）：不设这道闸，"量子计算专利布局"会被一篇讲市场规模的文章
+            # 判成高相关，真实缺口被淹没成"已覆盖"，Reflect 补检永不触发。
+            if tail and not any(t in content or t in title for t in tail):
+                hit = 0
+                relevance = 2
+            else:
+                hit = sum(1 for t in toks if t in content or t in title)
+                relevance = min(5, 2 + hit) if hit else 2
             confidence = 5 if len(content) >= 120 else (4 if len(content) >= 60 else 3)
             judgments.append(
                 {
@@ -214,7 +234,142 @@ class MockProvider:
                 lines.append(f"- {_snippet(r.get('content', ''), 90)} {r['citation_id']}")
             lines.append("")
 
+        conflicts = parse_conflicts_block(user)
+        if conflicts:
+            lines.append("## 争议与分歧")
+            lines.append("")
+            for c in conflicts:
+                lines.append(
+                    f"- **{c['topic']}**：一方口径为「{c['claim_a']}」（{c['id_a']}），"
+                    f"另一方口径为「{c['claim_b']}」（{c['id_b']}）。"
+                    "两者不可并存，本报告并列呈现，不做调和。"
+                )
+            lines.append("")
+
         return "\n".join(lines).rstrip() + "\n"
+
+    def _t_conflict(self, user: str) -> str:
+        """离线矛盾检测：同一指标、数值差异 ≥ 阈值的倍数 → 判冲突。
+
+        刻意**保守**：只认"可比的同一单位族数值"，且差异不足阈值就不报。
+        宁缺毋滥——把正常口径差异渲染成冲突，比漏报更伤报告可信度。
+        """
+        records = {r["citation_id"]: r for r in parse_evidence_block(user)}
+        pairs = parse_pairs_block(user)
+        conflicts: list[dict[str, Any]] = []
+        for p in pairs:
+            a, b = records.get(p["id_a"]), records.get(p["id_b"])
+            if not a or not b:
+                continue
+            na = _primary_number(a.get("content", ""))
+            nb = _primary_number(b.get("content", ""))
+            if not na or not nb or na[1] != nb[1]:
+                continue
+            lo, hi = sorted((na[0], nb[0]))
+            if lo <= 0:
+                continue
+            ratio = hi / lo
+            if ratio < self._min_ratio:
+                continue
+            severity = "high" if ratio >= 3 else ("medium" if ratio >= 2 else "low")
+            conflicts.append(
+                {
+                    "sub_question": p["topic"],
+                    "topic": _topic_label(p["topic"]),
+                    "claim_a": na[2],
+                    "source_a": p["id_a"],
+                    "claim_b": nb[2],
+                    "source_b": p["id_b"],
+                    "severity": severity,
+                    "summary": (
+                        f"同一指标出现约 {ratio:.1f} 倍的数值差异（同为 {na[1]} 口径），"
+                        "两者不可并存，需并列呈现。"
+                    ),
+                }
+            )
+        return json.dumps({"conflicts": conflicts}, ensure_ascii=False)
+
+
+def _hashing_embed(text: str, dim: int = MOCK_EMBED_DIM) -> list[float]:
+    """CJK bigram + ASCII 词的哈希词袋向量（L2 归一化）。确定性：同文本必得同向量。"""
+    s = (text or "").lower()
+    toks: list[str] = []
+    cjk = [ch for ch in s if "\u4e00" <= ch <= "\u9fff"]
+    toks.extend(cjk[i] + cjk[i + 1] for i in range(len(cjk) - 1))
+    toks.extend(re.findall(r"[a-z0-9]{2,}", s))
+    if not toks:
+        toks = [s[:4] or "_"]
+    vec = [0.0] * dim
+    for t in toks:
+        h = hashlib.md5(t.encode("utf-8")).digest()
+        idx = int.from_bytes(h[:4], "big") % dim
+        vec[idx] += 1.0 if h[4] % 2 == 0 else -1.0
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [round(v / norm, 6) for v in vec]
+
+
+_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(亿元|万元|亿|万|%|％)")
+_UNIT_BASE: dict[str, tuple[str, float]] = {
+    "亿元": ("亿", 1e8),
+    "亿": ("亿", 1e8),
+    "万元": ("万", 1e4),
+    "万": ("万", 1e4),
+    "%": ("%", 1.0),
+    "％": ("%", 1.0),
+}
+
+
+def _primary_number(text: str) -> tuple[float, str, str] | None:
+    """取正文主数值 → (归一化值, 单位族, 含该数值的原句)。
+
+    多个数值时取量级最大者当"主口径"——这是启发式的取舍，不是金融口径判断。
+    """
+    best: tuple[float, str, str] | None = None
+    for m in _NUM_RE.finditer(text or ""):
+        fam, scale = _UNIT_BASE[m.group(2)]
+        norm = float(m.group(1)) * scale
+        if best is None or norm > best[0]:
+            best = (norm, fam, _sentence_with(text, m.group(0)))
+    return best
+
+
+def _sentence_with(text: str, needle: str, limit: int = 60) -> str:
+    for seg in re.split(r"[。；;！!\n]", text or ""):
+        if needle in seg:
+            s = re.sub(r"\s+", " ", seg).strip()
+            return s if len(s) <= limit else s[:limit] + "…"
+    return needle
+
+
+_TAIL_SEP_RE = re.compile(r"[—\-]{2,}|[:：]")
+
+
+def _distinctive_tokens(sub_question: str) -> list[str]:
+    """子问题的"区别性部分"：`——`（或冒号）之后那段的分词。
+
+    planner 生成的子问题是「主题——侧面」结构（如「企业知识库 Agent 平台——市场规模」），
+    主题词在所有子问题里都出现，只有侧面能区分证据是否真的切题。
+    """
+    parts = [p for p in _TAIL_SEP_RE.split(sub_question or "") if p.strip()]
+    tail = parts[-1] if len(parts) > 1 else (sub_question or "")
+    return [t for t in re.split(r"[——/、，,与和的\s]+", tail) if len(t) >= 2]
+
+
+def _claim_tokens(text: str) -> list[str]:
+    """比较两句是否在谈同一指标用的实词（剔除纯数字与单字）。"""
+    out = []
+    for t in re.split(r"[^\w\u4e00-\u9fff]+", text or ""):
+        if len(t) >= 2 and not t.isdigit():
+            out.append(t)
+    return out
+
+
+def _topic_label(sub_question: str) -> str:
+    s = (sub_question or "").strip()
+    for sep in ("——", "：", ":", "·"):
+        if sep in s:
+            s = s.split(sep)[-1].strip()
+    return s[:20] or "未标注主题"
 
 
 def _dedupe_by_url(records: list[dict[str, str]]) -> list[dict[str, str]]:

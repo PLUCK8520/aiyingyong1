@@ -77,7 +77,7 @@ def build_provider(settings: Settings) -> Provider:
     mode = settings.llm_mode
     if mode == "mock":
         log.info("[gateway] LLM 走离线 mock（无 key 也能跑通链路；输出会在报告页脚标注）")
-        return MockProvider()
+        return MockProvider(settings)
     if mode == "dashscope":
         assert settings.dashscope_api_key  # config 已校验
         log.info(f"[gateway] LLM 走 dashscope，base_url={settings.dashscope_base_url}")
@@ -106,6 +106,7 @@ class LLMGateway:
             "direct": s.model_direct,
             "planner": s.model_planner,
             "judge": s.model_judge,
+            "conflict": s.model_conflict,
             "analyst": s.model_analyst,
             "audit_fast": s.model_audit_fast,
             "audit_strong": s.model_audit_strong,

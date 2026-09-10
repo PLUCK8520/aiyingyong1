@@ -12,7 +12,12 @@ from __future__ import annotations
 import re
 from typing import Iterable, Sequence
 
-from ..retrieval.citations import Evidence, render_evidence_block
+from ..retrieval.citations import (
+    Evidence,
+    render_conflicts_block,
+    render_evidence_block,
+    render_pairs_block,
+)
 
 OBJ_BEGIN = "<<OBJECTIVE>>"
 OBJ_END = "<<END>>"
@@ -92,11 +97,24 @@ JUDGE_SYSTEM = (
     '"confidence": int, "note": str}], "gaps": [str]}。'
 )
 
+CONFLICT_SYSTEM = (
+    "你是矛盾检测器。给定若干**证据对**（同一子问题下、主题相近的两条证据），"
+    "判断它们是否构成真实冲突。规则：\n"
+    "1. **口径不同不算冲突**。同一指标因统计范围不同而数值不同，只有在无法并存时才判冲突；\n"
+    "2. 只有同时满足「指向同一指标」且「数值或结论互斥」才输出 conflict；\n"
+    "3. claim_a / claim_b 必须是**证据原文里的原话片段**（≤60 字），不要改写、不要推断；\n"
+    "4. 严重度按差异量级：数值差 ≥3 倍 high、≥1.5 倍 medium、其余 low；\n"
+    "5. 不构成冲突的证据对**不要输出**。宁缺毋滥。\n"
+    '只输出 JSON：{"conflicts": [{"sub_question": str, "topic": str, "claim_a": str, '
+    '"source_a": str, "claim_b": str, "source_b": str, "severity": "low"|"medium"|"high", '
+    '"summary": str}]}，其中 source_* 用给定证据编号（如 [WEB1-1-1]）。'
+)
+
 ANALYST_SYSTEM = (
     "你是调研撰稿人。基于给定证据撰写结构化中文调研报告。铁律：\n"
     "1. 每一句涉及事实/数据的结论，必须紧跟其证据编号，如 [WEB1-1-1]；\n"
     "2. 只能使用给定证据里的信息，**禁止补充外部数据或常识推断**；\n"
-    "3. 证据互相矛盾时，单列「争议与分歧」小节，摆明双方口径，不要强行调和；\n"
+    "3. 证据互相矛盾时，单列「争议与分歧」小节，摆明双方口径，**不要强行调和**；\n"
     "4. 证据不足的结论要显式标注「（证据不足）」；\n"
     "5. **不要输出「参考资料」章节**，系统会按正文引用顺序自动追加，避免重复与编号漂移。\n"
     "输出 Markdown：一级标题为报告名，随后是「核心摘要」与按大纲分章正文。"
@@ -140,13 +158,45 @@ def build_judge_messages(
     ]
 
 
-def build_analyst_messages(
-    objective: str, outlines: Sequence[str], evidence: Iterable[Evidence]
+def build_conflict_messages(
+    objective: str,
+    evidence: Iterable[Evidence],
+    pairs: Sequence[tuple[str, str, str]],
 ) -> list[dict[str, str]]:
+    """矛盾检测消息：一份证据块 + 一份**受限**证据对清单（成本闸门在调用方）。
+
+    `pairs` 为 (id_a, id_b, topic) 序列——只传编号对，正文由证据块提供，不重复送上下文。
+    """
+    user = (
+        f"调研目标：{objective_block(objective)}\n\n"
+        f"证据原文：\n{render_evidence_block(evidence)}\n\n"
+        f"待比对证据对（`id_a || id_b || 主题`）：\n{render_pairs_block(pairs)}\n\n"
+        "请逐对判断是否构成矛盾，只输出构成冲突的项。"
+    )
+    return [
+        {"role": "system", "content": CONFLICT_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_analyst_messages(
+    objective: str,
+    outlines: Sequence[str],
+    evidence: Iterable[Evidence],
+    conflicts: Sequence[object] = (),
+) -> list[dict[str, str]]:
+    conflict_part = ""
+    if conflicts:
+        conflict_part = (
+            "\n\n已检出的**矛盾清单**（请在「争议与分歧」章节逐一呈现，并列双方口径与编号，"
+            "**不要调和、不要取平均、不要选边**）：\n"
+            f"{render_conflicts_block(conflicts)}"
+        )
     user = (
         f"{objective_block(objective)}\n\n"
         f"{outline_block(outlines)}\n\n"
-        f"可用证据：\n{render_evidence_block(evidence)}\n\n"
+        f"可用证据：\n{render_evidence_block(evidence)}"
+        f"{conflict_part}\n\n"
         "请按大纲撰写报告。"
     )
     return [

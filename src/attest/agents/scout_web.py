@@ -44,14 +44,20 @@ def run(payload: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     objective = payload.get("objective", "")
 
     queries = make_queries(sub_question, objective)
-    log.node(TAG, NODE, "开始", subq_no=subq_no, sub_question=sub_question)
+    seen = set(payload.get("seen_keys") or [])
+    log.node(TAG, NODE, "开始", subq_no=subq_no, sub_question=sub_question, skip_seen=len(seen))
 
     merged: dict[str, SearchResult] = {}
     errors: list[dict[str, Any]] = []
+    skipped = 0
     for q in queries:
         try:
             for r in ctx.search.search(q, max_results=RESULTS_PER_QUERY):
-                merged.setdefault(r.url or r.title, r)
+                key = r.url or r.title
+                if key in seen:  # 补检不重复抓同一来源，避免同文档拿到第二个引用编号
+                    skipped += 1
+                    continue
+                merged.setdefault(key, r)
         except Exception as exc:  # noqa: BLE001 - 单路检索失败不该炸掉整轮
             errors.append({"node": NODE, "sub_question": sub_question, "error": f"{type(exc).__name__}: {exc}"})
             log.warning(f"[scout] 检索失败 | query={q!r} | {type(exc).__name__}: {exc}")
@@ -65,13 +71,15 @@ def run(payload: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     ctx.trace.emit(
         "retrieval",
         node=NODE,
+        kind="web",
         subq_no=subq_no,
         sub_question=sub_question,
         queries=queries,
         hits=len(evidence),
+        skipped_seen=skipped,
         ids=[e.citation_id for e in evidence],
     )
-    log.node(TAG, NODE, "完成", subq_no=subq_no, queries=len(queries), hits=len(evidence))
+    log.node(TAG, NODE, "完成", subq_no=subq_no, queries=len(queries), hits=len(evidence), skipped_seen=skipped)
 
     out: dict[str, Any] = {"evidence": evidence}
     if errors:

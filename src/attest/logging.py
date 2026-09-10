@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 _CONFIGURED = False
+_LEVEL = "INFO"
 _DEFAULT_FORMAT = (
     "<green>{time:HH:mm:ss.SSS}</green> | <level>{level: <7}</level> | "
     "<cyan>{extra[mod]}</cyan> | {message}"
@@ -19,9 +20,14 @@ _DEFAULT_FORMAT = (
 
 
 def setup_logging(level: str = "INFO", *, sink: Any = None) -> None:
-    """幂等配置。多次调用只生效一次（避免重复 handler 导致日志翻倍）。"""
-    global _CONFIGURED
-    if _CONFIGURED:
+    """幂等配置：重复调用**同一级别**才短路；显式传入新级别时重新安装 handler。
+
+    为什么不能简单地"只生效一次"：`get_logger` 在模块 import 期就会调用本函数（此时是默认
+    INFO），而 CLI 的 `--quiet` 是在 import 之后才调用的。若严格只生效一次，`--quiet` 永远
+    不会生效——日志级别必须在调用方手上可改。
+    """
+    global _CONFIGURED, _LEVEL
+    if _CONFIGURED and level.upper() == _LEVEL and sink is None:
         return
     logger.remove()
     logger.add(
@@ -34,6 +40,7 @@ def setup_logging(level: str = "INFO", *, sink: Any = None) -> None:
     )
     logger.configure(extra={"mod": "attest"})
     _CONFIGURED = True
+    _LEVEL = level.upper()
 
 
 def _fmt(data: dict[str, Any]) -> str:
@@ -67,6 +74,9 @@ class _Bound:
 
 
 def get_logger(name: str) -> _Bound:
-    setup_logging()
+    # 只在**尚未配置**时用默认级别兜底。若这里无条件调用 setup_logging()，
+    # 会把调用方（CLI 的 --quiet）刚设好的级别又改回默认 INFO——静默失效，很难查。
+    if not _CONFIGURED:
+        setup_logging()
     short = name.split(".")[-1]
     return _Bound(short)

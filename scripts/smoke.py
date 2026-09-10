@@ -1,4 +1,4 @@
-"""T0.6 · 冒烟脚本：一条命令验证「网关能调通 + trace 完整 + 节点成对」。
+"""T0.6 / T3.11 · 冒烟脚本：一条命令验证「网关能调通 + trace 完整 + 节点成对 + P3 双源与矛盾」。
 
 用法：
     .venv/Scripts/python.exe scripts/smoke.py
@@ -62,7 +62,7 @@ def main() -> int:
 
     research = app.invoke(initial_state(QUERY, thread_id="smoke-research"))
     started_nodes = {e.get("node") for e in trace.of("node_start")}
-    for node in ("intent_router", "planner", "scout_web", "evidence_judge", "analyst"):
+    for node in ("intent_router", "planner", "scout_web", "scout_local", "evidence_judge", "reflect", "analyst"):
         check(f"[research] 节点 {node} 出现", node in started_nodes)
     check("[research] 产出非空报告", bool(research.get("report")), f"{len(research.get('report') or '')} 字")
     check(
@@ -75,6 +75,23 @@ def main() -> int:
         len(research.get("evidence") or []) >= 3,
         f"evidence={len(research.get('evidence') or [])}",
     )
+
+    # 3b) P3 切片：双源检索 + 反思 + 矛盾检测
+    evidence = research.get("evidence") or []
+    local_ev = [e for e in evidence if (e.url or "").startswith("local://")]
+    web_ev = [e for e in evidence if not (e.url or "").startswith("local://")]
+    check("[P3] 双源证据到齐（web + local）", bool(web_ev) and bool(local_ev),
+          f"web={len(web_ev)} local={len(local_ev)}")
+    check("[P3] reflect_count 已入 state", "reflect_count" in research,
+          f"reflect_count={research.get('reflect_count')}")
+    check("[P3] reflect_targets 字段存在", isinstance(research.get("reflect_targets"), list),
+          f"{len(research.get('reflect_targets') or [])} 个补检任务")
+    conflicts = research.get("conflicts")
+    check("[P3] conflicts 字段存在且为列表", isinstance(conflicts, list), f"{len(conflicts or [])} 条")
+    if conflicts:
+        check("[P3] 报告渲染「争议与分歧」章节", "争议与分歧" in (research.get("report") or ""))
+        check("[P3] 矛盾项带双方引用编号",
+              all(getattr(c, "source_a", None) and getattr(c, "source_b", None) for c in conflicts))
 
     direct = app.invoke(initial_state("你好，用一句话说明什么是向量检索。", thread_id="smoke-direct"))
     check("[direct] 路由为 direct", direct.get("route") == "direct", str(direct.get("route")))

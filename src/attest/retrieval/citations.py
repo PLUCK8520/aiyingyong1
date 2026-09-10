@@ -151,3 +151,80 @@ def parse_evidence_block(text: str) -> list[dict[str, str]]:
         }
         for m in EVIDENCE_LINE_RE.finditer(body)
     ]
+
+
+# ------------------------------------------------------------------ 矛盾对序列化契约
+# 与证据块同理：提示词与离线 mock 共用一份定义。
+# 行格式：`[WEB1-1-1] || [WEB1-1-3] || 主题`
+# 只传编号对 + 一份证据块，避免把正文重复送进上下文（矛盾检测是 O(对数) 的成本敏感步骤）。
+
+PAIRS_MARK_BEGIN = "<<PAIRS>>"
+PAIRS_MARK_END = "<<PAIRS_END>>"
+PAIR_LINE_RE = re.compile(
+    r"^(\[(?:WEB|LOC)\d+-\d+-\d+\]) \|\| (\[(?:WEB|LOC)\d+-\d+-\d+\]) \|\| (.*)$", re.MULTILINE
+)
+
+
+def render_pairs_block(pairs: Iterable[tuple[str, str, str]]) -> str:
+    """pairs: (citation_id_a, citation_id_b, topic) 序列。"""
+    lines = [PAIRS_MARK_BEGIN]
+    for a, b, topic in pairs:
+        lines.append(f"{a} || {b} || {_clean(topic)}")
+    lines.append(PAIRS_MARK_END)
+    return "\n".join(lines)
+
+
+def parse_pairs_block(text: str) -> list[dict[str, str]]:
+    if PAIRS_MARK_BEGIN in text:
+        body = text.split(PAIRS_MARK_BEGIN, 1)[1].split(PAIRS_MARK_END, 1)[0]
+    else:
+        body = text
+    return [
+        {"id_a": m.group(1), "id_b": m.group(2), "topic": m.group(3)}
+        for m in PAIR_LINE_RE.finditer(body)
+    ]
+
+
+# ------------------------------------------------------------------ 矛盾结果序列化契约
+# 行格式：`- 主题: {topic} | A: {id_a} {claim_a} | B: {id_b} {claim_b} | 严重度: {severity}`
+
+CONFLICTS_MARK_BEGIN = "<<CONFLICTS>>"
+CONFLICTS_MARK_END = "<<CONFLICTS_END>>"
+CONFLICT_LINE_RE = re.compile(
+    r"^- 主题: (.*?) \| A: (\[(?:WEB|LOC)\d+-\d+-\d+\]) (.*?) \| "
+    r"B: (\[(?:WEB|LOC)\d+-\d+-\d+\]) (.*?) \| 严重度: (\w+)$",
+    re.MULTILINE,
+)
+
+
+def render_conflicts_block(conflicts: Iterable["Conflict"]) -> str:  # noqa: F821
+    from ..schemas import Conflict as _Conflict  # 局部导入：避免根命名空间在模块导入期被拉起
+
+    lines = [CONFLICTS_MARK_BEGIN]
+    for c in conflicts:
+        if not isinstance(c, _Conflict):
+            continue
+        lines.append(
+            f"- 主题: {_clean(c.topic)} | A: {c.source_a} {_clean(c.claim_a)} | "
+            f"B: {c.source_b} {_clean(c.claim_b)} | 严重度: {c.severity}"
+        )
+    lines.append(CONFLICTS_MARK_END)
+    return "\n".join(lines)
+
+
+def parse_conflicts_block(text: str) -> list[dict[str, str]]:
+    if CONFLICTS_MARK_BEGIN in text:
+        body = text.split(CONFLICTS_MARK_BEGIN, 1)[1].split(CONFLICTS_MARK_END, 1)[0]
+    else:
+        return []
+    return [
+        {
+            "topic": m.group(1),
+            "id_a": m.group(2),
+            "claim_a": m.group(3),
+            "id_b": m.group(4),
+            "claim_b": m.group(5),
+            "severity": m.group(6),
+        }
+        for m in CONFLICT_LINE_RE.finditer(body)
+    ]

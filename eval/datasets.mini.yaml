@@ -1,0 +1,47 @@
+# T3.9 · 最小评测集（5–10 题）
+#
+# 只出两项指标（任务清单 T3.9 明确"只出两项"）：
+#   ① 每份报告的 token 成本   —— 成本是一等公民（D6），没有它无法判断任何优化的价值
+#   ② 引用有效率             —— 有引用且能回查的句子占比；unresolved 必须为 0
+#
+# 为什么现在就要有尺子：T4.4 的模型路由器策略要"依据 T3.9 的评测尺子"决定，不能盲切；
+# 没有基线数字，之后所有"优化了"的说法都无法证伪。
+#
+# expect_* 字段是**断言**，不满足即评测失败（退出码非 0）：
+#   expect_route       direct | research
+#   expect_conflict    报告是否应出现矛盾（需真存在互斥数值）
+#   expect_min_rounds  最少检索轮次（用于验证 Reflect 补检真的被触发）
+
+meta:
+  version: 1
+  built_at: "2026-09-10"
+  note: "全部离线（mock LLM + fixture 检索）。指标用于横向自比与回归，不与外部系统比。"
+
+cases:
+  - id: M1
+    query: "调研'企业知识库 Agent 平台'市场，按市场规模/竞品/收费模式三部分输出，附溯源链接"
+    expect_route: research
+    expect_conflict: true
+    note: "fixture 里埋了 180 亿 vs 62 亿的口径冲突，应触发矛盾检测"
+  - id: M2
+    query: "调研'企业知识库 Agent 平台'的竞品格局，按厂商分类/差异化优势两部分输出"
+    expect_route: research
+    expect_conflict: false
+    note: "竞品话题无互斥数值，不该报矛盾（检验宁缺毋滥）"
+  - id: M3
+    query: "调研'企业知识库 Agent 平台'的收费模式，按席位定价/私有化买断/按量计费三部分输出"
+    expect_route: research
+    expect_conflict: false
+  - id: M4
+    query: "调研'企业知识库 Agent 平台'，按市场规模/量子计算专利布局两部分输出"
+    expect_route: research
+    expect_min_rounds: 2
+    note: "第二个子问题在语料里无对应证据 → 应触发 Reflect 补检（缺口语料）"
+  - id: M5
+    query: "调研'企业知识库 Agent 平台'的落地情况，按行业落地率/交付成本两部分输出"
+    expect_route: research
+  - id: M6
+    query: "你好，用一句话说明什么是向量检索。"
+    expect_route: direct
+    expect_conflict: false
+    note: "轻问题走直答，不检索、不产出报告"

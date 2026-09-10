@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     model_direct: str = Field("qwen3.8-flash", alias="ATTEST_MODEL_DIRECT")
     model_planner: str = Field("qwen3.8-max", alias="ATTEST_MODEL_PLANNER")
     model_judge: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_JUDGE")
+    #: T3.7：矛盾检测是 O(对数) 的成本敏感任务，用 fast 档；仅在需要强推理时才升级
+    model_conflict: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_CONFLICT")
     model_analyst: str = Field("qwen3.8-max", alias="ATTEST_MODEL_ANALYST")
     model_audit_fast: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_AUDIT_FAST")
     model_audit_strong: str = Field("qwen3.8-max", alias="ATTEST_MODEL_AUDIT_STRONG")
@@ -68,6 +70,30 @@ class Settings(BaseSettings):
     context_truncate_chars: int = Field(4000, alias="ATTEST_CTX_TRUNCATE")
     search_concurrency: int = Field(3, alias="ATTEST_SEARCH_CONCURRENCY")
     max_reflect_rounds: int = Field(2, alias="ATTEST_MAX_REFLECT_ROUNDS")
+
+    # ---------------- P3：本地知识库（T3.1 / T3.2）----------------
+    local_enabled: bool = Field(True, alias="ATTEST_LOCAL_ENABLED")
+    local_docs_dir: Path = Field(DATA_DIR / "fixtures" / "local", alias="ATTEST_LOCAL_DOCS")
+    local_chroma_dir: Path = Field(DATA_DIR / "index" / "chroma", alias="ATTEST_CHROMA_DIR")
+    #: numpy=内存余弦（离线默认，快且无锁）/ chroma=持久化（验收档，先跑 ingest_local.py）
+    local_store: Literal["numpy", "chroma"] = Field("numpy", alias="ATTEST_LOCAL_STORE")
+    local_chunk_chars: int = Field(800, alias="ATTEST_CHUNK_CHARS")
+    local_chunk_overlap: int = Field(120, alias="ATTEST_CHUNK_OVERLAP")
+    #: 精排候选数（融合后送 rerank 的条数）
+    rerank_candidate_n: int = Field(20, alias="ATTEST_RERANK_CANDIDATES")
+
+    # ---------------- P3：矛盾检测（T3.7，《功能设计》§6.3）----------------
+    #: 证据相似度聚类阈值（同子问题内先聚类，再簇内两两比对）。
+    #: ⚠️ 该默认值是 **0.25**，由 `scripts/calibrate_conflict.py` 在**离线词法向量**上实测标定
+    #: （同子问题内相似度实测区间约 -0.01~0.56，取 0.25 可覆盖真实同口径证据对）。
+    #: **换成 text-embedding-v4 语义向量后必须重新标定**——两套向量空间的相似度分布完全不同。
+    conflict_cluster_threshold: float = Field(0.25, alias="ATTEST_CONFLICT_THRESHOLD")
+    #: 每簇最多比对数
+    conflict_pairs_per_cluster: int = Field(6, alias="ATTEST_CONFLICT_PAIRS_CLUSTER")
+    #: 全局比对数上限（超出按簇内相似度降序截断）——成本上限必须写进配置
+    conflict_pairs_global: int = Field(30, alias="ATTEST_CONFLICT_PAIRS_GLOBAL")
+    #: 数值口径差异达到该倍数才判为冲突（离线启发式用；真实模型由提示词约束）
+    conflict_min_ratio: float = Field(1.5, alias="ATTEST_CONFLICT_MIN_RATIO")
 
     # ---------------- 校验 ----------------
     @model_validator(mode="after")

@@ -39,6 +39,16 @@ class Evidence:
     score: float = 0.0
 
 
+@dataclass(frozen=True)
+class Hit:
+    """向量库召回结果（T3.1，《功能设计》§5 的 `Hit`）。"""
+
+    chunk_id: str
+    score: float
+    document: str
+    metadata: dict
+
+
 @runtime_checkable
 class SearchClient(Protocol):
     def search(self, query: str, *, max_results: int = 5) -> list[SearchResult]: ...
@@ -51,9 +61,25 @@ class Reranker(Protocol):
 
 @runtime_checkable
 class VectorStore(Protocol):
+    """向量库（T3.1）。
+
+    实现有两档，**接口一致**：
+      - `NumpyVectorStore`：内存余弦检索，离线默认档（无 IO、无锁，测试友好）
+      - `ChromaVectorStore`：Chroma 持久化，`ingest_local.py` 与验收档
+
+    切换 embedding 模型必须全量重建索引——`embedder` / `dim` 写进 collection 元数据，
+    不一致时**直接抛错**而不是返回脏结果（NFR-11）。
+    """
+
     def upsert(self, ids: list[str], vectors: list[list[float]], documents: list[str], metadatas: list[dict]) -> None: ...
 
-    def query(self, vector: list[float], *, top_k: int = 10) -> list[SearchResult]: ...
+    def query(self, vector: list[float], *, top_k: int = 10, where: dict | None = None) -> list[Hit]: ...
+
+    def count(self) -> int: ...
+
+    def dump(self) -> tuple[list[str], list[str], list[dict]]:
+        """导出 (ids, documents, metadatas)——用于"文档目录缺失但索引仍在"的恢复路径。"""
+        ...
 
 
 @runtime_checkable

@@ -41,13 +41,28 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     objective = plan.get("objective", "调研报告")
     outlines: list[str] = plan.get("outlines") or []
     evidence = list(state.get("evidence") or [])
+    conflicts = list(state.get("conflicts") or [])
 
     selected, filter_info = _select_evidence(state)
-    ctx.trace.emit("evidence_selected", node=NODE, selected=len(selected), **filter_info)
-    log.node(TAG, NODE, "开始", evidence=len(selected), outlines=len(outlines), **filter_info)
+    ctx.trace.emit(
+        "evidence_selected",
+        node=NODE,
+        selected=len(selected),
+        conflicts=len(conflicts),
+        **filter_info,
+    )
+    log.node(
+        TAG,
+        NODE,
+        "开始",
+        evidence=len(selected),
+        outlines=len(outlines),
+        conflicts=len(conflicts),
+        **filter_info,
+    )
 
     resp = ctx.gateway.chat(
-        build_analyst_messages(objective, outlines, selected),
+        build_analyst_messages(objective, outlines, selected, conflicts),
         task="analyst",
         temperature=0.3,
     )

@@ -26,8 +26,8 @@ NodeFn = Callable[[dict[str, Any], "NodeContext"], dict[str, Any]]
 class NodeContext:
     """节点运行所需的一切外部能力（依赖注入点）。
 
-    节点只认这里的接口，不认具体实现——把 `search` 换成 mock 还是 tavily，
-    节点代码一行都不用改。
+    节点只认这里的接口，不认具体实现——把 `search` 换成 mock 还是 tavily、
+    把 `local` 换成 Chroma 还是内存向量库，节点代码一行都不用改。
     """
 
     settings: Settings
@@ -35,6 +35,9 @@ class NodeContext:
     search: SearchClient
     trace: TraceWriter
     budget: BudgetConfig
+    #: 本地知识库检索（T3.4）。为 None 表示未启用——`scout_local` 会如实留痕并跳过，
+     #: 而不是假装检索过。
+    local: SearchClient | None = None
 
     def budget_snapshot(self, state: dict[str, Any]) -> BudgetSnapshot:
         return snapshot(

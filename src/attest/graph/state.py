@@ -29,6 +29,9 @@ class GraphState(TypedDict, total=False):
     plan: dict[str, Any]  # 存 dict 而非 Pydantic 实例：便于检查点序列化（P5 复核）
     round: int
     reflect_count: int
+    #: T3.6：reflect 产出的补检任务包（Send payload 列表）。**覆盖语义**——reflect 是唯一写入者。
+    #: 放到 state 而不是让路由函数现算，是为了让"为什么补检这几路"在 trace/检查点里可见。
+    reflect_targets: list[dict[str, Any]]
 
     # ---------- 并行写入：以下字段必须有累加 reducer ----------
     evidence: Annotated[list[Evidence], operator.add]
@@ -51,6 +54,7 @@ class GraphState(TypedDict, total=False):
 INITIAL_STATE: dict[str, Any] = {
     "round": 1,
     "reflect_count": 0,
+    "reflect_targets": [],
     "evidence": [],
     "judgments": [],
     "gaps": [],

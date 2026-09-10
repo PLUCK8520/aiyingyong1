@@ -59,13 +59,30 @@ class JudgeResult(BaseModel):
     gaps: list[str] = Field(default_factory=list, description="证据不足的缺口，供 Reflect 补检")
 
 
+Severity = Literal["low", "medium", "high"]
+
+
 class Conflict(BaseModel):
-    """T3.7 矛盾检测（P3 启用，先占位保证契约稳定）。"""
+    """T3.7 矛盾检测（字段对齐《功能设计》§6.3）。
+
+    注意 `source_a` / `source_b` 存的是**引用编号**（如 `[WEB1-1-1]`），不是 URL——
+    编号才可回查，URL 会随引用去重变化。`claim_*` 存双方各自的口径原话（截断）。
+    """
 
     sub_question: str
-    citation_a: str
-    citation_b: str
-    summary: str
+    topic: str
+    claim_a: str
+    source_a: str
+    claim_b: str
+    source_b: str
+    severity: Severity = "medium"
+    summary: str = ""
+
+
+class ConflictResult(BaseModel):
+    """T3.7 矛盾检测整体输出。"""
+
+    conflicts: list[Conflict] = Field(default_factory=list)
 
 
 AuditVerdict = Literal["supported", "partial", "unsupported"]
