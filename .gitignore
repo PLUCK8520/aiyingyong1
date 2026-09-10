@@ -29,9 +29,12 @@ data/chroma_smoke/
 chroma/
 chroma_db/
 
-# ---- Trace / 评测产物 ----
+# ---- Trace / 评测产物（每次运行都会变，不入库）----
 trace.jsonl
 *.jsonl.tmp
+data/trace/
+data/reports/
+data/cache/
 eval/reports/
 
 # ---- 前端 ----
