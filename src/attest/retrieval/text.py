@@ -36,11 +36,25 @@ def read_text(path: Path) -> str:
 
 
 _TITLE_RE = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
+_HEADING_MARK_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
 
 
 def doc_title(path: Path, text: str) -> str:
     m = _TITLE_RE.search(text or "")
     return m.group(1).strip() if m else path.stem
+
+
+def strip_markdown(text: str) -> str:
+    """把 markdown 标记降级为纯文本（分块与展示共用）。
+
+    只处理会污染"正文可读性"的标记：标题井号、`**`/`__` 强调、行内代码反引号。
+    刻意**不做**完整 CommonMark 解析——语料是自有知识库，够用即可。
+    目的：让摘要/引用里的句子读起来是人话，而不是 `# 标题 **重点**`。
+    """
+    s = _HEADING_MARK_RE.sub("", text or "")
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    return s.replace("`", "")
 
 
 def chunk_text(text: str, *, size: int = 800, overlap: int = 120) -> list[str]:
@@ -84,8 +98,11 @@ def load_chunks(root: Path, *, size: int = 800, overlap: int = 120) -> list[Chun
     for path in iter_documents(root):
         text = read_text(path)
         title = doc_title(path, text)
+        # 文档 H1 已单独存进 Chunk.title：从正文里去掉首个标题行，避免摘要/引用里
+        # 重复出现「# 标题」；其余 markdown 标记一并降级为纯文本（展示层不该看到 `#`/`**`）。
+        body = strip_markdown(_TITLE_RE.sub("", text, count=1))
         rel = path.relative_to(root).as_posix()
-        for i, piece in enumerate(chunk_text(text, size=size, overlap=overlap)):
+        for i, piece in enumerate(chunk_text(body, size=size, overlap=overlap)):
             cid = hashlib.sha1(f"{rel}#{i}".encode("utf-8")).hexdigest()[:12]
             out.append(
                 Chunk(chunk_id=cid, source_path=rel, title=title, ordinal=i, text=piece)

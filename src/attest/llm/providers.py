@@ -333,8 +333,17 @@ def _primary_number(text: str) -> tuple[float, str, str] | None:
     return best
 
 
+_HEADING_MARK_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+
+
+def _plain(text: str) -> str:
+    """剥掉 markdown 标记，供**展示**用（摘要/引用里的句子要是人话，不是 `# 标题 **重点**`）。"""
+    s = _HEADING_MARK_RE.sub("", text or "")
+    return s.replace("**", "").replace("__", "").replace("`", "")
+
+
 def _sentence_with(text: str, needle: str, limit: int = 60) -> str:
-    for seg in re.split(r"[。；;！!\n]", text or ""):
+    for seg in re.split(r"[。；;！!\n]", _plain(text)):
         if needle in seg:
             s = re.sub(r"\s+", " ", seg).strip()
             return s if len(s) <= limit else s[:limit] + "…"
@@ -389,7 +398,7 @@ def _unique(items) -> list[str]:
 
 
 def _snippet(text: str, n: int) -> str:
-    s = re.sub(r"\s+", " ", (text or "").strip())
+    s = re.sub(r"\s+", " ", _plain(text).strip())
     return s if len(s) <= n else s[:n].rstrip() + "…"
 
 

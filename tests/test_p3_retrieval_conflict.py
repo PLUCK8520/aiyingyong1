@@ -19,12 +19,14 @@ from pathlib import Path
 
 import pytest
 
+from attest.agents.evidence_judge import _dedupe_conflicts
 from attest.agents.reflect import targets_from_gaps
 from attest.quality.audit import extract_claims, verify_claim
 from attest.quality.conflict import Pair, group_by_sub_question, select_pairs
 from attest.retrieval.hybrid import BM25Retriever, rrf_fuse, tokenize
 from attest.retrieval.ports import Evidence
-from attest.retrieval.text import chunk_text, load_chunks
+from attest.retrieval.text import chunk_text, load_chunks, strip_markdown
+from attest.schemas import Conflict
 
 # ----------------------------------------------------------------- T3.1 分块
 
@@ -55,6 +57,26 @@ def test_load_chunks_id_is_stable_and_path_scoped(tmp_path: Path) -> None:
     assert [c.chunk_id for c in first] == [c.chunk_id for c in again], "chunk_id 不稳定"
     assert all(c.source_path == "a.md" for c in first)
     assert first[0].title == "标题A"
+
+
+def test_load_chunks_drops_h1_and_markdown_markers(tmp_path: Path) -> None:
+    """文档 H1 已存进 title，正文里不该再出现 `# 标题`；`**`/反引号也应降级为纯文本。
+
+    实测教训（P3 收尾）：摘要首句变成「# 内部定价与落地成本手册 …」，标题标记直接串进报告。
+    """
+    (tmp_path / "a.md").write_text(
+        "# 标题A\n\n正文含 **重点** 与 `代码` 标记。", encoding="utf-8"
+    )
+    chunks = load_chunks(tmp_path, size=200, overlap=20)
+    body = chunks[0].text
+    assert "#" not in body, f"正文不该含标题标记：{body!r}"
+    assert "**" not in body and "`" not in body, f"强调/代码标记未剥离：{body!r}"
+    assert "重点" in body and "代码" in body, "剥离标记不得丢字"
+    assert chunks[0].title == "标题A"
+
+
+def test_strip_markdown_keeps_inner_text() -> None:
+    assert strip_markdown("## 小标题\n\n**加粗** 与 `code`") == "小标题\n\n加粗 与 code"
 
 
 # ----------------------------------------------------------- T3.2 中文 BM25 / RRF
@@ -234,3 +256,47 @@ def test_pair_dataclass_is_frozen() -> None:
     p = Pair(a=a, b=b, topic="市场规模", similarity=0.5)
     with pytest.raises(Exception):
         p.topic = "改了"  # type: ignore[misc]
+
+
+# ------------------------------------------------------ T3.7 矛盾去重（同处分歧）
+
+_LOC_62 = "按此口径，2025 年国内市场规模约 62 亿元人民币，增速约 38%"
+
+
+def _cf(topic: str, ca: str, sa: str, cb: str = _LOC_62, sb: str = "[LOC1-1-1]") -> Conflict:
+    return Conflict(
+        sub_question=topic, topic=topic, claim_a=ca, source_a=sa, claim_b=cb, source_b=sb
+    )
+
+
+def test_dedupe_conflicts_merges_same_dispute_from_another_source() -> None:
+    """同一处分歧（对面都是同一句 62 亿）换了个来源又来报 → 只保留一条。
+
+    实测教训（P3 收尾）：`WEB1-1-1` 与 `WEB1-1-2` 分别和同一句 `LOC1-1-1` 配对，
+    报告"争议与分歧"把同一出处报了两遍。
+    """
+    c1 = _cf("市场规模", "2025 年规模约 180 亿元", "[WEB1-1-1]")
+    c2 = _cf("市场规模", "不把定制交付计入盘子，与含交付口径差约 2.9 倍", "[WEB1-1-2]")
+    kept = _dedupe_conflicts([c1, c2], [])
+    assert len(kept) == 1, f"同一处分歧应合并为 1 条，实际 {len(kept)}"
+    assert kept[0] is c1, "应保留先出现的那条"
+
+
+def test_dedupe_conflicts_keeps_distinct_metrics_in_same_topic() -> None:
+    """同一来源谈**不同指标**（原话不同）不得误并——去重判据必须收紧到"来源+原话都相同"。"""
+    size = _cf("市场规模", "规模约 180 亿元", "[WEB1-1-1]")
+    growth = _cf(
+        "市场规模",
+        "增速约 42%",
+        "[WEB1-1-1]",
+        cb="增速约 38%",
+        sb="[LOC1-1-1]",
+    )
+    kept = _dedupe_conflicts([size, growth], [])
+    assert len(kept) == 2, f"不同指标的分歧不应合并，实际 {len(kept)}"
+
+
+def test_dedupe_conflicts_drops_exact_repeat_across_rounds() -> None:
+    c = _cf("市场规模", "规模约 180 亿元", "[WEB1-1-1]")
+    kept = _dedupe_conflicts([c], [c])
+    assert kept == [], "跨轮完全相同应被去掉"
