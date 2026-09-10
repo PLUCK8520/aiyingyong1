@@ -109,7 +109,7 @@ CLI 方式：`python scripts/chat.py "你的调研问题"`
 
 架构蓝图受课程《DeepResearch 多 Agent 行业深度研究助手》启发；Citation Auditor、矛盾检测、预算治理、研究闭环、评测流水线等 9 个模块为自主设计（见方案 v2.4 §3 技术亮点）。选型经 **2026-09-08 与 2026-09-10 两轮联网核查**（见 `docs/审查报告-2026-09-08.md` 及其 F / G 节）。
 
-**仓库**：[gitee.com/lkp_qwer/attest](https://gitee.com/lkp_qwer/attest)（私有）。
-> 偏离说明：方案 §10.1 原定"GitHub 公开仓库"，实际落成**码云（Gitee）私有仓库**——国内网络下 GitHub 推送不稳定；后续若要投递展示，再镜像一份到 GitHub 并转为公开即可（提交历史与 tag 可完整镜像）。
+**仓库**：[github.com/teachmehowtouse/aiyingyong1](https://github.com/teachmehowtouse/aiyingyong1)（私有）。
+> 说明：已按方案 §10.1 落到 **GitHub 私有仓库**（属主 `teachmehowtouse`，仓库名沿用创建时的 `aiyingyong1`）。⚠️ **投递展示前需把仓库转为 Public，或邀请面试官为协作者**，否则对方看不到。历史曾短暂托管于 Gitee（国内网络备选），现已迁移至 GitHub，`main` 与 `p0`–`p4` 标签齐全。
 
 **命名**：**Attest / 质证**——"对证据的质疑与核实"。原名 Orchestr（灵枢）描述的是"调度"，而调度不是本项目的差异化；本项目的差异化是"核验"（逐句回查引用 / 冲突不调和 / 成本对账）。更名于 2026-09-10，设计与内容未改动。
