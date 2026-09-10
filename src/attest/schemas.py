@@ -94,3 +94,16 @@ class AuditItem(BaseModel):
     citation_id: str
     verdict: AuditVerdict
     reason: str = ""
+    #: 被判定的句子原文与所属章节——T4.2 降级要靠它定位到正文的哪一句。
+    sentence: str = ""
+    section: str = ""
+
+
+class AuditResult(BaseModel):
+    """T4.1 引用审计整体输出。
+
+    是 LLM 批量核验（FR-17：按 citation_id 分组，一组一次调用）的返回结构；
+    规则版审计器直接产出 `list[AuditItem]`，落进 state 时同构。
+    """
+
+    items: list[AuditItem] = Field(default_factory=list)

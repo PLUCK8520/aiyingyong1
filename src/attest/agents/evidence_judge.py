@@ -71,7 +71,7 @@ def _embed_fn(ctx: NodeContext):
 
 
 def _detect_conflicts(
-    ctx: NodeContext, objective: str, evidence: list[Any]
+    ctx: NodeContext, objective: str, evidence: list[Any], *, fuse_level: int = 0
 ) -> tuple[list[Conflict], Any]:
     """聚类 → 配额配对 → 一次受限 LLM 调用。返回 (conflicts, 该次调用的响应或 None)。"""
     if len(evidence) < 2:
@@ -90,6 +90,7 @@ def _detect_conflicts(
         task="conflict",
         response_model=ConflictResult,
         temperature=0.0,
+        fuse_level=fuse_level,  # T4.3：轻任务，熔断 L1 起可切便宜档
     )
     result: ConflictResult = resp.parsed  # type: ignore[assignment]
     return list(result.conflicts), resp
@@ -155,6 +156,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     sub_questions: list[str] = plan.get("sub_questions") or []
     all_evidence = list(state.get("evidence") or [])
     cur_round = int(state.get("round", 1) or 1)
+    fuse = ctx.budget_snapshot(state).fuse_level
 
     if not all_evidence:
         log.node(TAG, NODE, "跳过", reason="本轮无证据")
@@ -187,6 +189,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         task="judge",
         response_model=JudgeResult,
         temperature=0.0,
+        fuse_level=fuse,
     )
     result: JudgeResult = resp.parsed  # type: ignore[assignment]
 

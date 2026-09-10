@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..budget.account import FUSE_HARD
 from ..llm.prompts import build_analyst_messages
 from ..logging import get_logger
 from ..quality.citation_check import finalize
@@ -36,20 +37,55 @@ def _select_evidence(state: dict[str, Any]) -> tuple[list[Evidence], dict[str, A
     return selected, {"filtered": True, "dropped": len(evidence) - len(selected)}
 
 
+def truncate_topk(
+    evidence: list[Evidence], judgments: list[Any], k: int
+) -> list[Evidence]:
+    """T4.3 / 熔断 L2 · 上下文截断：按相关性降序取前 k 条（内部保持原有相对顺序）。
+
+    为什么是"按相关性"而不是"按顺序砍尾巴"：证据经 reducer 累加，顺序≈检索先后，
+    与重要度无关；reflect 补检来的证据排在后面，砍尾会把补检成果整段丢掉。
+    无判别信息（judgments 为空）时相关性一律记 0，退化为保留前 k 条——**已留痕**。
+    """
+    if k <= 0 or len(evidence) <= k:
+        return list(evidence)
+    relevance = {j.citation_id: int(getattr(j, "relevance", 0) or 0) for j in judgments}
+    ranked = sorted(range(len(evidence)), key=lambda i: (-relevance.get(evidence[i].citation_id, 0), i))
+    return [evidence[i] for i in sorted(ranked[:k])]
+
+
 def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     plan = state.get("plan") or {}
     objective = plan.get("objective", "调研报告")
     outlines: list[str] = plan.get("outlines") or []
     evidence = list(state.get("evidence") or [])
     conflicts = list(state.get("conflicts") or [])
+    fuse = ctx.budget_snapshot(state).fuse_level
 
     selected, filter_info = _select_evidence(state)
+
+    # T4.3 / L2：预算硬熔断 → 上下文截断（证据按相关性取 top-k）。**不改证据本身**，
+    # 只影响"这一次写正文时送进上下文多少"；引用索引仍基于全量证据（回查能力不受影响）。
+    trunc_info: dict[str, Any] = {}
+    if fuse >= FUSE_HARD and len(selected) > ctx.settings.fuse_ctx_top_k:
+        before = len(selected)
+        selected = truncate_topk(selected, list(state.get("judgments") or []), ctx.settings.fuse_ctx_top_k)
+        trunc_info = {"truncated": True, "before": before, "after": len(selected)}
+        ctx.trace.emit(
+            "context_truncated",
+            node=NODE,
+            fuse_level=fuse,
+            top_k=ctx.settings.fuse_ctx_top_k,
+            **trunc_info,
+        )
+
     ctx.trace.emit(
         "evidence_selected",
         node=NODE,
         selected=len(selected),
         conflicts=len(conflicts),
+        fuse_level=fuse,
         **filter_info,
+        **trunc_info,
     )
     log.node(
         TAG,
@@ -58,13 +94,16 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         evidence=len(selected),
         outlines=len(outlines),
         conflicts=len(conflicts),
+        fuse_level=fuse,
         **filter_info,
+        **trunc_info,
     )
 
     resp = ctx.gateway.chat(
         build_analyst_messages(objective, outlines, selected, conflicts),
         task="analyst",
         temperature=0.3,
+        fuse_level=fuse,
     )
 
     # 索引基于**全量证据**建：筛选只影响"写什么"，不影响"能不能回查"
@@ -94,5 +133,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         "report": final_report,
         "reference_list": refs,
         "citation_check": check,
+        # T4.4：记录正文是用哪个档位写的，供 trace / 成本面板复盘"降级后报告由谁产出"
+        "model_tier": ctx.gateway.router.tier("analyst", fuse_level=fuse),
         **accumulate(resp),
     }

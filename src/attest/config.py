@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     model_audit_fast: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_AUDIT_FAST")
     model_audit_strong: str = Field("qwen3.8-max", alias="ATTEST_MODEL_AUDIT_STRONG")
     model_embed: str = Field("text-embedding-v4", alias="ATTEST_MODEL_EMBED")
+    #: T4.4 / 熔断 L1：轻任务（intent / direct / judge / conflict / audit_fast）降级目标。
+    #: 默认取单价表里最便宜的对话模型（qwen3.7-flash，0.3/1.2 元每百万）。
+    model_fuse_light: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_FUSE_LIGHT")
 
     # ---------------- 预算（派生式，ADR-02）----------------
     budget_total_cny: float = Field(2.0, alias="ATTEST_BUDGET_CNY")
@@ -68,6 +71,8 @@ class Settings(BaseSettings):
     fixture_dir: Path = Field(DATA_DIR / "fixtures", alias="ATTEST_FIXTURE_DIR")
 
     context_truncate_chars: int = Field(4000, alias="ATTEST_CTX_TRUNCATE")
+    #: T4.3 / 熔断 L2：正文证据按相关性截断到 top-k（设计 §6.5「上下文截断（证据按相关性取 top-k）」）
+    fuse_ctx_top_k: int = Field(6, alias="ATTEST_FUSE_CTX_TOP_K")
     search_concurrency: int = Field(3, alias="ATTEST_SEARCH_CONCURRENCY")
     max_reflect_rounds: int = Field(2, alias="ATTEST_MAX_REFLECT_ROUNDS")
 
@@ -94,6 +99,13 @@ class Settings(BaseSettings):
     conflict_pairs_global: int = Field(30, alias="ATTEST_CONFLICT_PAIRS_GLOBAL")
     #: 数值口径差异达到该倍数才判为冲突（离线启发式用；真实模型由提示词约束）
     conflict_min_ratio: float = Field(1.5, alias="ATTEST_CONFLICT_MIN_RATIO")
+
+    # ---------------- P4：引用审计（T4.1 / T4.2，《功能设计》FR-17）----------------
+    #: 审计开关。离线（mock）走规则版；dashscope 走「flash 初筛 + 强模型复核」两段式。
+    audit_enabled: bool = Field(True, alias="ATTEST_AUDIT_ENABLED")
+    #: 单章节 unsupported 占比超过该值 → 触发该章节重写（T4.2b，限 audit_max_rewrites 次）
+    audit_rewrite_ratio: float = Field(0.5, alias="ATTEST_AUDIT_REWRITE_RATIO")
+    audit_max_rewrites: int = Field(1, alias="ATTEST_AUDIT_MAX_REWRITES")
 
     # ---------------- 校验 ----------------
     @model_validator(mode="after")

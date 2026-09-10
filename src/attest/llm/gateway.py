@@ -7,7 +7,8 @@
   - **绕过网关 = 漏账**，预算熔断即失效。
   - 结构化输出校验失败自动重试（≤2 次），重试的成本同样记账。
 
-模型路由（任务 → 模型）目前是静态配置；T4.4 会依据 T3.9 的评测尺子改成策略表。
+模型路由（任务 → 模型）**不在本文件**：策略表与熔断降级在 `llm/router.py`（T4.4），
+网关只负责记账与调用。本文件通过 `self.router` 委托选型，并接受节点传入的 `fuse_level`。
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from .providers import (
     Provider,
     ProviderResult,
 )
+from .router import ModelRouter
 
 log = get_logger(__name__)
 
@@ -97,24 +99,12 @@ class LLMGateway:
     def __post_init__(self) -> None:
         if self.provider is None:
             self.provider = build_provider(self.settings)
+        #: T4.4 模型路由器（无状态，可安全复用）。策略表不在网关里。
+        self.router = ModelRouter(self.settings)
 
-    # ---------------- 模型路由（静态档，T4.4 改为策略表）----------------
-    def model_for(self, task: str) -> str:
-        s = self.settings
-        mapping = {
-            "intent": s.model_intent,
-            "direct": s.model_direct,
-            "planner": s.model_planner,
-            "judge": s.model_judge,
-            "conflict": s.model_conflict,
-            "analyst": s.model_analyst,
-            "audit_fast": s.model_audit_fast,
-            "audit_strong": s.model_audit_strong,
-        }
-        if task in mapping:
-            return mapping[task]
-        log.warning(f"[gateway] 任务 {task!r} 没有模型映射，回退 model_direct")
-        return s.model_direct
+    # ---------------- 模型路由（委托 llm/router.py，T4.4）----------------
+    def model_for(self, task: str, *, fuse_level: int = 0) -> str:
+        return self.router.route(task, fuse_level=fuse_level)
 
     # ---------------- 对话 ----------------
     def chat(
@@ -126,8 +116,9 @@ class LLMGateway:
         temperature: float = 0.2,
         response_model: type[TModel] | None = None,
         max_retries: int = 2,
+        fuse_level: int = 0,
     ) -> LLMResponse:
-        model = model or self.model_for(task)
+        model = model or self.model_for(task, fuse_level=fuse_level)
         convo = list(messages)
         total_in = total_out = 0
         cost = 0.0
@@ -153,7 +144,7 @@ class LLMGateway:
             total_in += result.input_tokens
             total_out += result.output_tokens
             cost += c
-            self._emit_call(task, model, result, c, latency_ms, attempt + 1)
+            self._emit_call(task, model, result, c, latency_ms, attempt + 1, fuse_level)
 
             if response_model is None:
                 return LLMResponse(
@@ -230,7 +221,14 @@ class LLMGateway:
 
     # ---------------- 内部 ----------------
     def _emit_call(
-        self, task: str, model: str, result: ProviderResult, cost: float, latency_ms: float, attempt: int
+        self,
+        task: str,
+        model: str,
+        result: ProviderResult,
+        cost: float,
+        latency_ms: float,
+        attempt: int,
+        fuse_level: int = 0,
     ) -> None:
         if self.trace is None:
             return
@@ -239,6 +237,8 @@ class LLMGateway:
             task=task,
             model=model,
             provider=self.provider.name,
+            tier=self.router.tier(task, fuse_level=fuse_level),
+            fuse_level=fuse_level,
             input_tokens=result.input_tokens,
             output_tokens=result.output_tokens,
             total_tokens=result.input_tokens + result.output_tokens,

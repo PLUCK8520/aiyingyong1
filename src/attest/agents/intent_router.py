@@ -16,13 +16,15 @@ TAG = "intent"
 
 def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     query = state.get("query", "")
-    log.node(TAG, NODE, "开始", query=query)
+    fuse = ctx.budget_snapshot(state).fuse_level
+    log.node(TAG, NODE, "开始", query=query, fuse_level=fuse)
 
     resp = ctx.gateway.chat(
         build_intent_messages(query),
         task="intent",
         response_model=RouteDecision,
         temperature=0.0,
+        fuse_level=fuse,  # T4.3：熔断 L1 起，轻任务由路由器切便宜档
     )
     decision: RouteDecision = resp.parsed  # type: ignore[assignment]
 

@@ -34,8 +34,11 @@ NODE_LABEL = {
     "direct_responder": "快速回答",
     "planner": "任务规划",
     "scout_web": "并行检索",
+    "scout_local": "本地检索",
     "evidence_judge": "证据判别",
+    "reflect": "反思补检",
     "analyst": "撰写报告",
+    "auditor": "引用审计",
 }
 
 
@@ -47,13 +50,20 @@ def _brief(node: str, increment: dict[str, Any]) -> str:
     if node == "planner":
         plan = increment.get("plan") or {}
         return f"子问题 {len(plan.get('sub_questions', []))} 个 / 大纲 {len(plan.get('outlines', []))} 章"
-    if node == "scout_web":
+    if node in ("scout_web", "scout_local"):
         return f"命中 {len(increment.get('evidence', []))} 条证据"
     if node == "evidence_judge":
         return f"判别 {len(increment.get('judgments', []))} 条 / 缺口 {len(increment.get('gaps', []))} 项"
     if node == "analyst":
         check = increment.get("citation_check") or {}
         return f"引用 {check.get('referenced', 0)} 处 / 未解析 {len(check.get('unresolved', []))} 处"
+    if node == "auditor":
+        s = increment.get("audit_summary") or {}
+        return (
+            f"判定 {s.get('total', 0)} 句 | supported {s.get('supported', 0)} / "
+            f"partial {s.get('partial', 0)} / unsupported {s.get('unsupported', 0)} | "
+            f"降级 {s.get('degraded_sentences', 0)} 句"
+        )
     if node == "direct_responder":
         return f"{len(increment.get('direct_answer', ''))} 字"
     return ""
@@ -146,6 +156,13 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"引用: 有来源 {check.get('referenced', 0)} 处 / 未解析 {len(check.get('unresolved', []))} 处 / "
             f"引用段落占比 {check.get('cited_ratio', 0):.0%} | 校验 {'通过' if check.get('pass') else '未通过'}"
+        )
+    audit = final.get("audit_summary") or {}
+    if audit:
+        print(
+            f"审计: 判定 {audit.get('total', 0)} 句 | 支持 {audit.get('supported', 0)} / "
+            f"部分 {audit.get('partial', 0)} / 未证实 {audit.get('unsupported', 0)} | "
+            f"降级 {audit.get('degraded_sentences', 0)} 句（审计器：{audit.get('auditor')}）"
         )
 
     if settings.llm_mode == "mock":

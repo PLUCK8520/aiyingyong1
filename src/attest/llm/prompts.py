@@ -120,6 +120,48 @@ ANALYST_SYSTEM = (
     "输出 Markdown：一级标题为报告名，随后是「核心摘要」与按大纲分章正文。"
 )
 
+AUDIT_SYSTEM = (
+    "你是引用审计员。给定若干「引用编号 + 该编号的证据原文 + 引用了该编号的句子」，"
+    "逐句判断句子是否被**它所引用的那条证据**支持。三档判定：\n"
+    "- supported  ：证据直接支持该句的关键事实与数值；\n"
+    "- partial    ：证据只部分支持，句子里还有证据未提及的要素；\n"
+    "- unsupported：证据不支持，**或句子里的关键数值在证据里不存在**（数值不一致是硬否决）。\n"
+    "铁律：\n"
+    "1. 只依据给定证据判断，**不得引入外部知识或常识**；\n"
+    "2. 数值必须逐字核对——引用审计最危险的不是'没找到'，而是'数字被改过却看起来对'；\n"
+    '3. 只输出 JSON：{"items": [{"citation_id": str, "sentence": str, '
+    '"verdict": "supported"|"partial"|"unsupported", "reason": str}]}；\n'
+    "4. sentence 必须原样回抄待核验句子，不要改写，以便系统回定位。"
+)
+
+
+def build_audit_messages(
+    objective: str,
+    groups: Sequence[tuple[str, str, Sequence[str]]],
+) -> list[dict[str, str]]:
+    """引用审计消息（T4.1 / FR-17）。
+
+    `groups` 为 `(citation_id, 证据原文, [引用该编号的句子, ...])` 序列——
+    **按 citation_id 分组**是本任务的关键成本约束：若逐句一次调用，调用数会随报告
+    长度线性爆炸，审计成本盖过主链路。分组后一组一次，调用数 = 被引用编号数。
+    """
+    blocks: list[str] = []
+    for cid, evidence, sentences in groups:
+        lines = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, start=1))
+        blocks.append(
+            f"引用编号 {cid}\n证据原文：{compact_block(evidence)}\n"
+            f"待核验句子（共 {len(sentences)} 条）：\n{lines}"
+        )
+    user = (
+        f"调研目标：{objective_block(objective)}\n\n"
+        + "\n\n".join(blocks)
+        + "\n\n请逐句判定，只输出 JSON。"
+    )
+    return [
+        {"role": "system", "content": AUDIT_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
 
 def build_intent_messages(query: str) -> list[dict[str, str]]:
     return [
@@ -201,5 +243,72 @@ def build_analyst_messages(
     )
     return [
         {"role": "system", "content": ANALYST_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+# ------------------------------------------------------------------ T4.2b 章节重写
+
+REWRITE_BEGIN = "<<REWRITE>>"
+SECBODY_BEGIN = "<<SECTION_BODY>>"
+REWRITE_END_MARK = "<<END>>"
+
+REWRITE_SYSTEM = (
+    "你是调研报告的**章节重写员**。上一轮写出的某章节，其句子被引用审计判为"
+    "「证据不支持」——它在证据里找不到对应的事实或数值。现在请你只重写这一节。铁律：\n"
+    "1. **只保留证据能支持的结论**；证据没提到的数字、比例、结论，一律不得出现；\n"
+    "2. 每一句涉及事实/数据的结论，必须紧跟其证据编号，如 [WEB1-1-1]；\n"
+    "3. 只能使用给定证据，**禁止补充外部数据或常识推断**；\n"
+    "4. 若给定证据不足以支撑该章节的主题，就**如实写「（证据不足）」**，不要用空话凑数；\n"
+    "5. 只输出重写后的**章节正文**，不要重复章节标题，也不要输出「参考资料」。\n"
+    "6. 输出格式：把正文放在 "
+    f"{SECBODY_BEGIN} 与 {REWRITE_END_MARK} 之间；不要输出其它标记或解释。"
+)
+
+_SECTION_BODY_RE = re.compile(
+    re.escape(SECBODY_BEGIN) + r"(.*?)" + re.escape(REWRITE_END_MARK), re.DOTALL
+)
+_REWRITE_BLOCK_RE = re.compile(
+    re.escape(REWRITE_BEGIN) + r"(.*?)" + re.escape(REWRITE_END_MARK), re.DOTALL
+)
+
+
+def _rewrite_block(title: str, body: str) -> str:
+    return f"{REWRITE_BEGIN}{compact_block(title)}{REWRITE_END_MARK}\n{compact_block(body)}"
+
+
+def parse_rewrite_target(text: str) -> tuple[str, str]:
+    """从重写提示词里取回 (章节标题, 原正文)。供离线 mock 解析——提示词与 mock 共用一份定义。"""
+    m = _REWRITE_BLOCK_RE.search(text or "")
+    if not m:
+        return "", ""
+    block = m.group(1)
+    if REWRITE_END_MARK in block:
+        title, body = block.split(REWRITE_END_MARK, 1)
+        return title.strip(), body.strip()
+    return block.strip(), ""
+
+
+def parse_rewrite_output(text: str) -> str:
+    """取模型输出的章节正文；没按标记输出时退化为整段（宽松解析，不中断链路）。"""
+    m = _SECTION_BODY_RE.search(text or "")
+    return (m.group(1) if m else (text or "")).strip()
+
+
+def build_rewrite_messages(
+    objective: str,
+    title: str,
+    body: str,
+    evidence: Iterable[Evidence],
+) -> list[dict[str, str]]:
+    user = (
+        f"调研目标：{objective_block(objective)}\n\n"
+        f"待重写章节标题：{title}\n"
+        f"该章节当前正文：\n{_rewrite_block(title, body)}\n\n"
+        f"本节可用证据（编号 → 原文）：\n{render_evidence_block(evidence)}\n\n"
+        "请只重写这一节的正文，按第 6 条格式输出。"
+    )
+    return [
+        {"role": "system", "content": REWRITE_SYSTEM},
         {"role": "user", "content": user},
     ]

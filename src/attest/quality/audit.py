@@ -44,6 +44,9 @@ _UNIT_FAMILY: dict[str, tuple[str, float]] = {
     "个": ("count", 1.0),
 }
 _NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(亿元|亿|万元|万|元|%|％|倍|家|个)")
+#: 引用编号不是 claim 的内容——判定前必须先剥掉。实测踩过坑：碎片句「… [WEB1-1-1]」里的
+#: "WEB1" 被当成实词，覆盖率算成 0% → 误判 unsupported → 对正确的报告触发假降级。
+_CITE_STRIP_RE = re.compile(r"\[(?:WEB|LOC)\d+-\d+-\d+\]")
 
 
 def _numbers(text: str) -> set[tuple[str, float]]:
@@ -71,15 +74,18 @@ def verify_claim(
     claim = (claim or "").strip()
     if not claim:
         return "unsupported", "空 claim，无法判定"
-    uniq = list(dict.fromkeys(_content_tokens(claim)))
+    # 先剥掉引用编号再判定：编号（如 WEB1-1-1）不是 claim 的内容，
+    # 留着会把"含编号的碎片句"误判为 unsupported（见 _CITE_STRIP_RE 注释）。
+    text = _CITE_STRIP_RE.sub("", claim)
+    uniq = list(dict.fromkeys(_content_tokens(text)))
     if not uniq:
-        return "partial", "claim 里没有可判定的实词（疑似纯指代句）"
+        return "partial", "claim 里没有可判定的实词（疑似纯指代/被截断的占位句）"
 
     ev_tokens = set(_content_tokens(evidence))
     hit = [t for t in uniq if t in ev_tokens]
     ratio = len(hit) / len(uniq)
 
-    claim_nums = _numbers(claim)
+    claim_nums = _numbers(text)
     if claim_nums:
         missing = claim_nums - _numbers(evidence)
         if missing:
@@ -120,3 +126,211 @@ def audit_claims(
         verdict, reason = verify_claim(sent, evidence)
         items.append(AuditItem(citation_id=cid, verdict=verdict, reason=reason))
     return items
+
+
+# ------------------------------------------------------------------ T4.1/T4.2：分节 + 定位 + 降级
+
+REF_HEADING = "## 参考资料"
+UNVERIFIED_MARK = "（未证实）"
+_CITE_RE = re.compile(r"\[(?:WEB|LOC)\d+-\d+-\d+\]")
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+
+
+def report_body(report: str) -> str:
+    """截掉文末「参考资料」章节——审计只针对正文（参考行不含正文引用语义）。"""
+    return (report or "").split(REF_HEADING, 1)[0]
+
+
+def iter_sections(report: str) -> list[tuple[str, str]]:
+    """把正文按 markdown 标题切成 [(章节标题, 章节正文)]。首个无标题段落标题为空串。"""
+    sections: list[tuple[str, str]] = []
+    title = ""
+    buf: list[str] = []
+    for line in report_body(report).splitlines():
+        m = _HEADING_RE.match(line)
+        if m:
+            if buf or title:
+                sections.append((title, "\n".join(buf)))
+            title = m.group(1).strip()
+            buf = []
+        else:
+            buf.append(line)
+    if buf or title:
+        sections.append((title, "\n".join(buf)))
+    return sections
+
+
+def extract_claims_sectioned(
+    report: str, citation_ids: Iterable[str]
+) -> list[tuple[str, str, str]]:
+    """在 `extract_claims` 基础上带上所属章节 → [(句子, 引用编号, 章节标题)]。"""
+    known = set(citation_ids)
+    out: list[tuple[str, str, str]] = []
+    for title, body in iter_sections(report):
+        for raw in _CLAIM_SPLIT_RE.split(body):
+            sent = (raw or "").strip().lstrip("-*# ").strip()
+            if not sent:
+                continue
+            ids = [i for i in _CITE_RE.findall(sent) if i in known]
+            for cid in dict.fromkeys(ids):
+                out.append((sent, cid, title))
+    return out
+
+
+def group_claims_by_citation(
+    claims: Iterable[tuple[str, str]]
+) -> dict[str, list[str]]:
+    """按 citation_id 分组（FR-17）：同一引用的多个句子合并为一次核验调用。"""
+    grouped: dict[str, list[str]] = {}
+    for sent, cid in claims:
+        bucket = grouped.setdefault(cid, [])
+        if sent not in bucket:
+            bucket.append(sent)
+    return grouped
+
+
+def sentence_citation_map(claims: Iterable[tuple[str, str, str]]) -> dict[str, list[str]]:
+    """句子 → 该句引用的全部编号（保持出现顺序、去重）。
+
+    为什么需要它：一句话可能**同时引用两个来源**（尤其「争议与分歧」里并列双方口径的句子）。
+    此时按单条来源核对数值必然"缺数"，会把正确的句子误判为 unsupported——实测踩到过。
+    所以判定要按**该句所引来源的并集**，而不是只看其中一条。
+    """
+    out: dict[str, list[str]] = {}
+    for sent, cid, _ in claims:
+        bucket = out.setdefault(sent, [])
+        if cid not in bucket:
+            bucket.append(cid)
+    return out
+
+
+def union_evidence_text(sent_cids: Iterable[str], evidence_by_id: dict[str, str]) -> str:
+    """把一句话所引来源的证据正文拼成并集文本（去重、保持顺序）。"""
+    seen: dict[str, None] = {}
+    for cid in sent_cids:
+        text = evidence_by_id.get(cid)
+        if text:
+            seen.setdefault(text, None)
+    return "\n".join(seen)
+
+
+def degrade_report(report: str, items: Sequence[AuditItem]) -> tuple[str, dict[str, object]]:
+    """T4.2a 降级动作：unsupported 的句子 → **去掉其引用编号**并标注「（未证实）」。
+
+    为什么"去编号 + 标注"而不是"整句删除"：Attest 的立场是**不静默删证据**——
+    读者应当看到"这里原本有个结论，但它没通过核验"，而不是被无声抹掉。
+
+    只在正文里替换；参考资料由调用方用同一索引重渲染，保证编号不悬空。
+    """
+    bad: dict[str, set[str]] = {}
+    for it in items:
+        if it.verdict == "unsupported" and it.sentence:
+            bad.setdefault(it.sentence, set()).add(it.citation_id)
+    if not bad:
+        return report, {"degraded": 0, "removed_citations": [], "sections": []}
+
+    out = report
+    removed: list[str] = []
+    sections: set[str] = set()
+    degraded = 0
+    for sent, cids in bad.items():
+        if sent not in out:
+            continue  # 句子已被前一次替换改写，跳过（幂等）
+        new_sent = sent
+        for cid in cids:
+            new_sent = new_sent.replace(cid, "")
+            removed.append(cid)
+        # 去掉编号后常残留"词 空格 标点"的缝隙，顺手清理，避免出现"42% 。"这类观感问题
+        new_sent = re.sub(r"\s{2,}", " ", new_sent)
+        new_sent = re.sub(r"\s+([。；;！!？?，,、）)])", r"\1", new_sent)
+        new_sent = re.sub(r"[（(]\s*[）)]", "", new_sent)  # 编号被移走后可能留下空括号
+        new_sent = new_sent.strip()
+        out = out.replace(sent, f"{new_sent}{UNVERIFIED_MARK}")
+        degraded += 1
+    for it in items:
+        if it.verdict == "unsupported" and it.section:
+            sections.add(it.section)
+    return out, {
+        "degraded": degraded,
+        "removed_citations": sorted(set(removed)),
+        "sections": sorted(sections),
+    }
+
+
+def section_failure_ratios(items: Sequence[AuditItem]) -> dict[str, float]:
+    """按章节汇总 unsupported 占比（T4.2b 判定"该章节要不要重写"用）。"""
+    total: dict[str, int] = {}
+    bad: dict[str, int] = {}
+    for it in items:
+        sec = it.section or "(无章节)"
+        total[sec] = total.get(sec, 0) + 1
+        if it.verdict == "unsupported":
+            bad[sec] = bad.get(sec, 0) + 1
+    return {s: round(bad.get(s, 0) / n, 4) for s, n in total.items() if n}
+
+
+# ------------------------------------------------------------- T4.2b：章节重写
+
+#: 无标题段没有锚点，无法定位重写——只能靠"降级标注"兜底
+PLACEHOLDER_SECTION = "(无章节)"
+
+
+def rewrite_targets(
+    items: Sequence[AuditItem], threshold: float
+) -> dict[str, float]:
+    """需要重写的章节 → 失败率（严格大于阈值才重写）。
+
+    无标题段（`PLACEHOLDER_SECTION`）**排除在外**：没有标题就没有替换锚点，
+    硬重写会写错位置。这类段落由 `degrade_report` 逐句标注「未证实」兜底。
+    """
+    out: dict[str, float] = {}
+    for sec, ratio in section_failure_ratios(items).items():
+        if not sec or sec == PLACEHOLDER_SECTION:
+            continue
+        if ratio > threshold:
+            out[sec] = ratio
+    return out
+
+
+def section_body(report: str, title: str) -> str:
+    """取指定章节的正文（不含标题行，已 strip）。找不到返回空串。"""
+    for sec_title, body in iter_sections(report):
+        if sec_title == title:
+            return body.strip()
+    return ""
+
+
+def citations_in_section(report: str, title: str) -> list[str]:
+    """该章节正文里出现过的引用编号（按出现顺序去重）——重写时只喂这些证据。"""
+    return list(dict.fromkeys(_CITE_RE.findall(section_body(report, title))))
+
+
+def replace_section(report: str, title: str, new_body: str) -> str:
+    """把指定章节的正文整体替换（保留标题行与文末「参考资料」）。找不到章节则原样返回。
+
+    只动目标章节的行区间：从它的标题行起，到下一个标题行前止。这样顶层标题（`# 报告`）
+    与相邻章节都不受影响——避免"重写一节、错搬一片"。
+    """
+    body = report_body(report)
+    tail = report[len(body) :]  # 以「## 参考资料」开头（可能为空）
+    lines = body.splitlines()
+    out: list[str] = []
+    i = 0
+    replaced = False
+    while i < len(lines):
+        line = lines[i]
+        m = _HEADING_RE.match(line)
+        if m and m.group(1).strip() == title:
+            out.append(line)
+            out.append("")
+            out.append(new_body.strip())
+            i += 1
+            while i < len(lines) and not _HEADING_RE.match(lines[i]):
+                i += 1
+            replaced = True
+            continue
+        out.append(line)
+        i += 1
+    if not replaced:
+        return report
+    return "\n".join(out).rstrip() + "\n" + tail

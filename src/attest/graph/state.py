@@ -15,7 +15,7 @@ import operator
 from typing import Annotated, Any, TypedDict
 
 from ..retrieval.ports import Evidence
-from ..schemas import Conflict, Judgment
+from ..schemas import AuditItem, Conflict, Judgment
 
 
 class GraphState(TypedDict, total=False):
@@ -48,6 +48,13 @@ class GraphState(TypedDict, total=False):
     report: str
     reference_list: str
     citation_check: dict[str, Any]
+    #: T4.1 引用审计结果。auditor 是**唯一写入者**（analyst → auditor 单线），故无需 reducer。
+    audit_items: list[AuditItem]
+    audit_summary: dict[str, Any]
+    #: T4.2b 章节重写次数（auditor 写，覆盖语义）
+    rewrite_count: int
+    #: T4.4 模型路由器：正文（analyst）本次使用的档位 strong|fast。供 trace 与降级判断。
+    model_tier: str
 
 
 #: 供 build.py 初始化用：所有 reducer 字段必须给初值
@@ -63,6 +70,10 @@ INITIAL_STATE: dict[str, Any] = {
     "errors": [],
     "cost_incurred": 0.0,
     "tokens_incurred": 0,
+    "audit_items": [],
+    "audit_summary": {},
+    "rewrite_count": 0,
+    "model_tier": "strong",
 }
 
 

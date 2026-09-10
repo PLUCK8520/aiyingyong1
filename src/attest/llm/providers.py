@@ -26,7 +26,7 @@ from ..retrieval.citations import (
     parse_pairs_block,
 )
 from ..trace.events import estimate_tokens
-from .prompts import parse_objective, parse_outline, parse_subqs
+from .prompts import parse_objective, parse_outline, parse_rewrite_target, parse_subqs
 
 log = get_logger(__name__)
 
@@ -247,6 +247,21 @@ class MockProvider:
             lines.append("")
 
         return "\n".join(lines).rstrip() + "\n"
+
+    def _t_analyst_rewrite(self, user: str) -> str:
+        """T4.2b 离线章节重写：只回抄**本节所引证据**的片段（带编号）。
+
+        这正是重写的语义——把"证据支持不了的句子"换成"证据里真有的内容"。
+        离线档没有模型可造句，所以退化为"证据摘录"；但结构合法、引用可回查，
+        足以验证 T4.2b 的「重写 → 复检 → 收口」这条链路确实接通。
+        """
+        _title, _old = parse_rewrite_target(user)
+        records = _dedupe_by_url(parse_evidence_block(user))
+        if not records:
+            return "- （证据不足）本节未能找到可支撑的结论。"
+        return "\n".join(
+            f"- {_snippet(r.get('content', ''), 90)} {r['citation_id']}" for r in records[:3]
+        )
 
     def _t_conflict(self, user: str) -> str:
         """离线矛盾检测：同一指标、数值差异 ≥ 阈值的倍数 → 判冲突。

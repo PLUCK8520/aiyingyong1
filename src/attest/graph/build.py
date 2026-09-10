@@ -9,7 +9,7 @@
                                                           ↓
                                                        reflect ─有缺口且未超轮且未熔断→ 再扇出 2N 路
                                                           ↓ 否则
-                                                       analyst → END
+                                                       analyst → auditor（引用审计+降级）→ END
 
 关键点：
   - `scout_web` / `scout_local` 是 Send 的目标节点，入参是**单个子问题包**（不是全量 state）；
@@ -28,6 +28,7 @@ from langgraph.types import Send
 
 from ..agents import (
     analyst,
+    auditor,
     direct_responder,
     evidence_judge,
     intent_router,
@@ -42,6 +43,7 @@ from ..budget.account import BudgetConfig
 from ..config import DATA_DIR, Settings
 from ..llm.gateway import LLMGateway
 from ..logging import get_logger
+from ..quality.citation_auditor import make_citation_auditor
 from ..retrieval.local_search import make_local_client as build_local_client
 from ..retrieval.mock_search import FixtureSearchClient
 from ..retrieval.ports import SearchClient
@@ -138,6 +140,7 @@ def build_context(
         gateway=gateway,
         search=search or make_search_client(settings),
         local=local if local is not None else make_local_search_client(settings, gateway),
+        auditor=make_citation_auditor(settings, gateway),
         trace=trace,
         budget=BudgetConfig(
             total_cny=settings.budget_total_cny,
@@ -205,6 +208,7 @@ def build_graph(ctx: NodeContext, *, checkpointer: Any = None):
     g.add_node("evidence_judge", bind(evidence_judge.run, name="evidence_judge", ctx=ctx))
     g.add_node("reflect", bind(reflect.run, name="reflect", ctx=ctx))
     g.add_node("analyst", bind(analyst.run, name="analyst", ctx=ctx))
+    g.add_node("auditor", bind(auditor.run, name="auditor", ctx=ctx))
 
     g.add_edge(START, "intent_router")
     g.add_conditional_edges("intent_router", route_after_intent, ["direct_responder", "planner"])
@@ -215,7 +219,8 @@ def build_graph(ctx: NodeContext, *, checkpointer: Any = None):
     g.add_conditional_edges(
         "reflect", route_after_reflect, [*SCOUT_NODES, "analyst"]
     )
-    g.add_edge("analyst", END)
+    g.add_edge("analyst", "auditor")
+    g.add_edge("auditor", END)
     g.add_edge("direct_responder", END)
 
     return g.compile(checkpointer=checkpointer)
@@ -236,4 +241,5 @@ def graph_node_sequence() -> list[str]:
         "evidence_judge",
         "reflect",
         "analyst",
+        "auditor",
     ]

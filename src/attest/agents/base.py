@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from ..budget.account import BudgetConfig, BudgetSnapshot, snapshot
 from ..config import Settings
@@ -16,6 +16,9 @@ from ..llm.gateway import LLMGateway, LLMResponse
 from ..logging import get_logger
 from ..retrieval.ports import SearchClient
 from ..trace.events import TraceWriter
+
+if TYPE_CHECKING:  # 仅类型标注用：避免 agents → quality 的运行期硬依赖
+    from ..quality.citation_auditor import CitationAuditor
 
 log = get_logger(__name__)
 
@@ -36,8 +39,10 @@ class NodeContext:
     trace: TraceWriter
     budget: BudgetConfig
     #: 本地知识库检索（T3.4）。为 None 表示未启用——`scout_local` 会如实留痕并跳过，
-     #: 而不是假装检索过。
+    #: 而不是假装检索过。
     local: SearchClient | None = None
+    #: 引用审计器（T4.1）。为 None 表示审计关闭——`auditor` 节点会如实留痕并跳过。
+    auditor: "CitationAuditor | None" = None
 
     def budget_snapshot(self, state: dict[str, Any]) -> BudgetSnapshot:
         return snapshot(

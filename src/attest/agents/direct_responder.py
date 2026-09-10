@@ -15,9 +15,12 @@ TAG = "direct"
 
 def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     query = state.get("query", "")
-    log.node(TAG, NODE, "开始", query=query)
+    fuse = ctx.budget_snapshot(state).fuse_level
+    log.node(TAG, NODE, "开始", query=query, fuse_level=fuse)
 
-    resp = ctx.gateway.chat(build_direct_messages(query), task="direct", temperature=0.3)
+    resp = ctx.gateway.chat(
+        build_direct_messages(query), task="direct", temperature=0.3, fuse_level=fuse
+    )
 
     cost, toks = budget_after(state, resp)
     report_budget(ctx, NODE, cost, toks)
