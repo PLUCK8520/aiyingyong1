@@ -1,0 +1,46 @@
+# ---- 助手工作记忆（项目内部数据，不入公开仓库）----
+.workbuddy/
+
+# ---- 环境 / 密钥 ----
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---- 项目数据（本地缓存 / 索引 / 检查点，不入库）----
+data/cache/
+data/chroma_smoke/
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+chroma_db/
+
+# ---- Trace / 评测产物 ----
+trace.jsonl
+*.jsonl.tmp
+eval/reports/
+
+# ---- 前端 ----
+node_modules/
+frontend/dist/
+.vite/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

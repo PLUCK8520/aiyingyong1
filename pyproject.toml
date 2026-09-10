@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attest"
+version = "0.0.1"
+description = "Attest（质证）· 逐句质证的多 Agent 行业深度调研系统"
+readme = "docs/README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "chromadb==1.5.9",
+    "jieba==0.42.1",
+    "rank-bm25==0.2.2",
+    "aiosqlite==0.22.1",
+    "pypdf==6.18.0",
+    "fastapi==0.141.1",
+    "pydantic-settings==2.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# 默认离线：任何需要真实 API 的用例必须显式打 marker，不随 pytest 默认跑
+markers = [
+    "online: 需要真实外部 API（默认跳过）",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"

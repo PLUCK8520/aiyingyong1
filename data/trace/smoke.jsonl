@@ -1,0 +1,62 @@
+{"ts": 1789037388.0182, "run_id": "smoke", "event": "llm_call", "task": "direct", "model": "qwen3.8-flash", "provider": "mock", "input_tokens": 57, "output_tokens": 78, "total_tokens": 135, "cost_cny": 0.0002562, "latency_ms": 0.02, "token_estimate": true, "attempt": 1}
+{"ts": 1789037388.0329, "run_id": "smoke", "event": "node_start", "node": "intent_router"}
+{"ts": 1789037388.0331, "run_id": "smoke", "event": "llm_call", "task": "intent", "model": "qwen3.7-flash", "provider": "mock", "input_tokens": 124, "output_tokens": 29, "total_tokens": 153, "cost_cny": 7.2e-05, "latency_ms": 0.03, "token_estimate": true, "attempt": 1}
+{"ts": 1789037388.0341, "run_id": "smoke", "event": "fuse", "node": "intent_router", "fuse_level": 0, "cost_incurred": 7.2e-05, "tokens_incurred": 153, "used_ratio": 0.00051}
+{"ts": 1789037388.0342, "run_id": "smoke", "event": "node_end", "node": "intent_router", "duration_ms": 1.2, "outputs": ["cost_incurred", "route", "route_reason", "tokens_incurred"]}
+{"ts": 1789037388.0347, "run_id": "smoke", "event": "node_start", "node": "planner"}
+{"ts": 1789037388.035, "run_id": "smoke", "event": "llm_call", "task": "planner", "model": "qwen3.8-max", "provider": "mock", "input_tokens": 112, "output_tokens": 94, "total_tokens": 206, "cost_cny": 0.004728, "latency_ms": 0.25, "token_estimate": true, "attempt": 1}
+{"ts": 1789037388.035, "run_id": "smoke", "event": "fuse", "node": "planner", "fuse_level": 0, "cost_incurred": 0.0048, "tokens_incurred": 359, "used_ratio": 0.0024}
+{"ts": 1789037388.0351, "run_id": "smoke", "event": "node_end", "node": "planner", "duration_ms": 0.5, "outputs": ["cost_incurred", "plan", "tokens_incurred"]}
+{"ts": 1789037388.0364, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037388.0366, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 1, "sub_question": "企业知识库 Agent 平台——市场规模", "queries": ["企业知识库 Agent 平台——市场规模", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——市场规模"], "hits": 2, "ids": ["[WEB1-1-1]", "[WEB1-1-2]"]}
+{"ts": 1789037388.0368, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.4, "outputs": ["evidence"]}
+{"ts": 1789037388.037, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037388.0371, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 2, "sub_question": "企业知识库 Agent 平台——竞品", "queries": ["企业知识库 Agent 平台——竞品", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——竞品"], "hits": 2, "ids": ["[WEB1-2-1]", "[WEB1-2-2]"]}
+{"ts": 1789037388.0372, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.2, "outputs": ["evidence"]}
+{"ts": 1789037388.0374, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037388.0375, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 3, "sub_question": "企业知识库 Agent 平台——收费模式", "queries": ["企业知识库 Agent 平台——收费模式", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——收费模式"], "hits": 2, "ids": ["[WEB1-3-1]", "[WEB1-3-2]"]}
+{"ts": 1789037388.0376, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.1, "outputs": ["evidence"]}
+{"ts": 1789037388.038, "run_id": "smoke", "event": "node_start", "node": "evidence_judge"}
+{"ts": 1789037388.0384, "run_id": "smoke", "event": "llm_call", "task": "judge", "model": "qwen3.7-flash", "provider": "mock", "input_tokens": 1108, "output_tokens": 346, "total_tokens": 1454, "cost_cny": 0.0007476, "latency_ms": 0.31, "token_estimate": true, "attempt": 1}
+{"ts": 1789037388.0385, "run_id": "smoke", "event": "fuse", "node": "evidence_judge", "fuse_level": 0, "cost_incurred": 0.005548, "tokens_incurred": 1813, "used_ratio": 0.006043}
+{"ts": 1789037388.0386, "run_id": "smoke", "event": "node_end", "node": "evidence_judge", "duration_ms": 0.6, "outputs": ["cost_incurred", "gaps", "judgments", "tokens_incurred"]}
+{"ts": 1789037388.0389, "run_id": "smoke", "event": "node_start", "node": "analyst"}
+{"ts": 1789037388.0389, "run_id": "smoke", "event": "evidence_selected", "node": "analyst", "selected": 5, "filtered": true, "dropped": 1}
+{"ts": 1789037388.0393, "run_id": "smoke", "event": "llm_call", "task": "analyst", "model": "qwen3.8-max", "provider": "mock", "input_tokens": 1056, "output_tokens": 477, "total_tokens": 1533, "cost_cny": 0.029844, "latency_ms": 0.22, "token_estimate": true, "attempt": 1}
+{"ts": 1789037388.0394, "run_id": "smoke", "event": "fuse", "node": "analyst", "fuse_level": 0, "cost_incurred": 0.035392, "tokens_incurred": 3346, "used_ratio": 0.017696}
+{"ts": 1789037388.0394, "run_id": "smoke", "event": "node_end", "node": "analyst", "duration_ms": 0.5, "outputs": ["citation_check", "cost_incurred", "reference_list", "report", "tokens_incurred"]}
+{"ts": 1789037408.0044, "run_id": "smoke", "event": "llm_call", "task": "direct", "model": "qwen3.8-flash", "provider": "mock", "input_tokens": 57, "output_tokens": 78, "total_tokens": 135, "cost_cny": 0.0002562, "latency_ms": 0.05, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0187, "run_id": "smoke", "event": "node_start", "node": "intent_router"}
+{"ts": 1789037408.0188, "run_id": "smoke", "event": "llm_call", "task": "intent", "model": "qwen3.7-flash", "provider": "mock", "input_tokens": 124, "output_tokens": 29, "total_tokens": 153, "cost_cny": 7.2e-05, "latency_ms": 0.03, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0189, "run_id": "smoke", "event": "fuse", "node": "intent_router", "fuse_level": 0, "cost_incurred": 7.2e-05, "tokens_incurred": 153, "used_ratio": 0.00051}
+{"ts": 1789037408.019, "run_id": "smoke", "event": "node_end", "node": "intent_router", "duration_ms": 0.3, "outputs": ["cost_incurred", "route", "route_reason", "tokens_incurred"]}
+{"ts": 1789037408.0194, "run_id": "smoke", "event": "node_start", "node": "planner"}
+{"ts": 1789037408.0197, "run_id": "smoke", "event": "llm_call", "task": "planner", "model": "qwen3.8-max", "provider": "mock", "input_tokens": 112, "output_tokens": 94, "total_tokens": 206, "cost_cny": 0.004728, "latency_ms": 0.23, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0198, "run_id": "smoke", "event": "fuse", "node": "planner", "fuse_level": 0, "cost_incurred": 0.0048, "tokens_incurred": 359, "used_ratio": 0.0024}
+{"ts": 1789037408.0199, "run_id": "smoke", "event": "node_end", "node": "planner", "duration_ms": 0.5, "outputs": ["cost_incurred", "plan", "tokens_incurred"]}
+{"ts": 1789037408.0212, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037408.0214, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037408.0215, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 1, "sub_question": "企业知识库 Agent 平台——市场规模", "queries": ["企业知识库 Agent 平台——市场规模", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——市场规模"], "hits": 2, "ids": ["[WEB1-1-1]", "[WEB1-1-2]"]}
+{"ts": 1789037408.0218, "run_id": "smoke", "event": "node_start", "node": "scout_web"}
+{"ts": 1789037408.022, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 3, "sub_question": "企业知识库 Agent 平台——收费模式", "queries": ["企业知识库 Agent 平台——收费模式", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——收费模式"], "hits": 2, "ids": ["[WEB1-3-1]", "[WEB1-3-2]"]}
+{"ts": 1789037408.0221, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.2, "outputs": ["evidence"]}
+{"ts": 1789037408.0218, "run_id": "smoke", "event": "retrieval", "node": "scout_web", "subq_no": 2, "sub_question": "企业知识库 Agent 平台——竞品", "queries": ["企业知识库 Agent 平台——竞品", "「企业知识库 Agent 平台」 企业知识库 Agent 平台——竞品"], "hits": 2, "ids": ["[WEB1-2-1]", "[WEB1-2-2]"]}
+{"ts": 1789037408.0224, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.8, "outputs": ["evidence"]}
+{"ts": 1789037408.0219, "run_id": "smoke", "event": "node_end", "node": "scout_web", "duration_ms": 0.7, "outputs": ["evidence"]}
+{"ts": 1789037408.0234, "run_id": "smoke", "event": "node_start", "node": "evidence_judge"}
+{"ts": 1789037408.024, "run_id": "smoke", "event": "llm_call", "task": "judge", "model": "qwen3.7-flash", "provider": "mock", "input_tokens": 1108, "output_tokens": 346, "total_tokens": 1454, "cost_cny": 0.0007476, "latency_ms": 0.34, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0241, "run_id": "smoke", "event": "fuse", "node": "evidence_judge", "fuse_level": 0, "cost_incurred": 0.005548, "tokens_incurred": 1813, "used_ratio": 0.006043}
+{"ts": 1789037408.0242, "run_id": "smoke", "event": "node_end", "node": "evidence_judge", "duration_ms": 0.7, "outputs": ["cost_incurred", "gaps", "judgments", "tokens_incurred"]}
+{"ts": 1789037408.0245, "run_id": "smoke", "event": "node_start", "node": "analyst"}
+{"ts": 1789037408.0245, "run_id": "smoke", "event": "evidence_selected", "node": "analyst", "selected": 5, "filtered": true, "dropped": 1}
+{"ts": 1789037408.0249, "run_id": "smoke", "event": "llm_call", "task": "analyst", "model": "qwen3.8-max", "provider": "mock", "input_tokens": 1056, "output_tokens": 477, "total_tokens": 1533, "cost_cny": 0.029844, "latency_ms": 0.24, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.025, "run_id": "smoke", "event": "fuse", "node": "analyst", "fuse_level": 0, "cost_incurred": 0.035392, "tokens_incurred": 3346, "used_ratio": 0.017696}
+{"ts": 1789037408.0251, "run_id": "smoke", "event": "node_end", "node": "analyst", "duration_ms": 0.6, "outputs": ["citation_check", "cost_incurred", "reference_list", "report", "tokens_incurred"]}
+{"ts": 1789037408.027, "run_id": "smoke", "event": "node_start", "node": "intent_router"}
+{"ts": 1789037408.0272, "run_id": "smoke", "event": "llm_call", "task": "intent", "model": "qwen3.7-flash", "provider": "mock", "input_tokens": 110, "output_tokens": 21, "total_tokens": 131, "cost_cny": 5.82e-05, "latency_ms": 0.03, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0272, "run_id": "smoke", "event": "fuse", "node": "intent_router", "fuse_level": 0, "cost_incurred": 5.8e-05, "tokens_incurred": 131, "used_ratio": 0.000437}
+{"ts": 1789037408.0273, "run_id": "smoke", "event": "node_end", "node": "intent_router", "duration_ms": 0.2, "outputs": ["cost_incurred", "route", "route_reason", "tokens_incurred"]}
+{"ts": 1789037408.0276, "run_id": "smoke", "event": "node_start", "node": "direct_responder"}
+{"ts": 1789037408.0277, "run_id": "smoke", "event": "llm_call", "task": "direct", "model": "qwen3.8-flash", "provider": "mock", "input_tokens": 59, "output_tokens": 80, "total_tokens": 139, "cost_cny": 0.0002632, "latency_ms": 0.03, "token_estimate": true, "attempt": 1}
+{"ts": 1789037408.0277, "run_id": "smoke", "event": "fuse", "node": "direct_responder", "fuse_level": 0, "cost_incurred": 0.000321, "tokens_incurred": 270, "used_ratio": 0.0009}
+{"ts": 1789037408.0278, "run_id": "smoke", "event": "node_end", "node": "direct_responder", "duration_ms": 0.2, "outputs": ["cost_incurred", "direct_answer", "tokens_incurred"]}

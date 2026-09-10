@@ -1,0 +1,22 @@
+# Attest（质证）· 直接依赖（P-1 实测版本，2026-09-10）
+# 环境：Windows / Python 3.13.14
+# 完整传递依赖见 requirements.lock.txt（106 条，pip freeze 全量）
+#
+# 安装：python -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
+
+# --- 编排 ---
+langgraph==1.2.11
+langgraph-checkpoint-sqlite==3.1.1
+
+# --- 检索 / 本地向量 ---
+chromadb==1.5.9
+jieba==0.42.1
+rank-bm25==0.2.2
+
+# --- 存储 / IO ---
+aiosqlite==0.22.1
+pypdf==6.18.0
+
+# --- 接入 ---
+fastapi==0.141.1
+pydantic-settings==2.15.0
