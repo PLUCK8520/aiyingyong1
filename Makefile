@@ -6,7 +6,7 @@
 PY := .venv/bin/python
 PY_WIN := .venv/Scripts/python.exe
 
-.PHONY: help install dev api web test smoke verify clean tag-p6
+.PHONY: help install dev api web test smoke eval baselines verify clean tag-p6
 
 help:
 	@echo "make install  安装前后端依赖"
@@ -15,6 +15,8 @@ help:
 	@echo "make web      只起前端  http://127.0.0.1:5173"
 	@echo "make test     跑 pytest（离线，不耗额度）"
 	@echo "make smoke    跑端到端探针 + 前端契约探针"
+	@echo "make eval     跑正式评测（15 题 · 五指标）"
+	@echo "make baselines 跑 baseline 对照组（3 条路线）"
 	@echo "make tag-p6   打 p6 标签（需先 make smoke 全绿）"
 
 install:
@@ -38,6 +40,14 @@ web:
 
 test:
 	$(PY) -m pytest -q
+
+# T7.2 · 正式评测（五指标）。--tag 便于版本对比
+eval:
+	$(PY) -m eval.run --tag local
+
+# T7.2 · baseline 对照组（裸答 / 单轮 RAG / RAG+审计）
+baselines:
+	$(PY) -m eval.baselines
 
 # 三层验证：单测 → 真 ASGI 栈冒烟 → 真 TCP 端口端到端
 smoke:
