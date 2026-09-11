@@ -21,8 +21,11 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     query = state.get("query", "")
     log.node(TAG, NODE, "开始", query=query)
 
+    # T5.2：把用户画像注入系统提示词（空画像则为空串，不注入空段落）
+    from .memory_loader import profile_block as _profile_block
+
     resp = ctx.gateway.chat(
-        build_planner_messages(query),
+        build_planner_messages(query, profile_block=_profile_block(state)),
         task="planner",
         response_model=Plan,
         temperature=0.2,

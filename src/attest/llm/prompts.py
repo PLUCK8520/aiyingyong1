@@ -177,9 +177,20 @@ def build_direct_messages(query: str) -> list[dict[str, str]]:
     ]
 
 
-def build_planner_messages(query: str) -> list[dict[str, str]]:
+def _append_profile(system: str, profile_block: str) -> str:
+    """T5.2：把用户画像片段拼到系统提示词末尾。
+
+    **留空则原样返回**——绝不为空画像插入一个空的"用户偏好"段落，那会污染提示词、
+    让模型以为"用户没有偏好"（与"不知道"是不同语义）。
+    """
+    if not profile_block:
+        return system
+    return f"{system}\n\n{profile_block}"
+
+
+def build_planner_messages(query: str, *, profile_block: str = "") -> list[dict[str, str]]:
     return [
-        {"role": "system", "content": PLANNER_SYSTEM},
+        {"role": "system", "content": _append_profile(PLANNER_SYSTEM, profile_block)},
         {"role": "user", "content": query},
     ]
 
@@ -226,6 +237,8 @@ def build_analyst_messages(
     outlines: Sequence[str],
     evidence: Iterable[Evidence],
     conflicts: Sequence[object] = (),
+    *,
+    profile_block: str = "",
 ) -> list[dict[str, str]]:
     conflict_part = ""
     if conflicts:
@@ -242,7 +255,7 @@ def build_analyst_messages(
         "请按大纲撰写报告。"
     )
     return [
-        {"role": "system", "content": ANALYST_SYSTEM},
+        {"role": "system", "content": _append_profile(ANALYST_SYSTEM, profile_block)},
         {"role": "user", "content": user},
     ]
 

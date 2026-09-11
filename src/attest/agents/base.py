@@ -20,6 +20,8 @@ from ..trace.events import TraceWriter
 if TYPE_CHECKING:  # 仅类型标注用：避免 agents → quality 的运行期硬依赖
     from ..quality.citation_auditor import CitationAuditor
 
+from langgraph.errors import GraphInterrupt  # T5.4：interrupt 异常需显式放行（见 `bind`）
+
 log = get_logger(__name__)
 
 NodeFn = Callable[[dict[str, Any], "NodeContext"], dict[str, Any]]
@@ -43,6 +45,8 @@ class NodeContext:
     local: SearchClient | None = None
     #: 引用审计器（T4.1）。为 None 表示审计关闭——`auditor` 节点会如实留痕并跳过。
     auditor: "CitationAuditor | None" = None
+    #: 用户画像存储（T5.2）。为 None 表示记忆关闭——`memory_loader` 会如实留痕并返回空画像。
+    profile: "Any | None" = None
 
     def budget_snapshot(self, state: dict[str, Any]) -> BudgetSnapshot:
         return snapshot(
@@ -84,6 +88,14 @@ def bind(fn: NodeFn, *, name: str, ctx: NodeContext) -> Callable[[dict[str, Any]
     """把 `(state, ctx)` 纯函数 + 依赖，包成 LangGraph 可用的 `(state) -> increment`。
 
     trace 的 `node_start` / `node_end` 在这里成对写入——这是冒烟清单第 3 条的落点。
+
+    ⚠️ 关于 `config`（T5.4）：LangGraph 会把运行期 `config` 以**关键字参数**注入节点函数
+    （`RunnableConfig`）。我们**不接收它**（签名里没有 `config` 形参），这是有意的：
+      - 节点不需要读 config；
+      - `interrupt()` 走的是**上下文变量**（NodeContext/运行时栈）而非 config 参数，
+        所以不接收 config **也能正常 interrupt**（P5 实测）。
+    若将来某节点确需 config（如读 `config["configurable"]`），再给那个节点单独加形参，
+    不要在这里全局透传——那会让所有节点都被迫接受一个它们不用的参数。
     """
 
     def node(state: dict[str, Any]) -> dict[str, Any]:
@@ -91,6 +103,13 @@ def bind(fn: NodeFn, *, name: str, ctx: NodeContext) -> Callable[[dict[str, Any]
         t0 = time.perf_counter()
         try:
             out = fn(state, ctx)
+        except GraphInterrupt:
+            # T5.4：`interrupt()` 是用**异常**实现挂起的（GraphInterrupt）。这是**正常控制流**，
+            # 不是错误——若在此记 node_error，日志与 trace 里会出现刺眼的"失败"，
+            # 掩盖真正的故障。故显式放行：记一条 node_interrupt 后原样抛出（LangGraph 需要它）。
+            ctx.trace.emit("node_interrupt", node=name, duration_ms=round((time.perf_counter() - t0) * 1000, 1))
+            log.node(name, name, "挂起等待人工确认（interrupt）")
+            raise
         except Exception as exc:  # noqa: BLE001 - 要留下失败痕迹再抛出
             ctx.trace.emit("node_error", node=name, error=f"{type(exc).__name__}: {exc}")
             log.error(f"[{name}] 失败 | agent={name} | error={type(exc).__name__}: {exc}")

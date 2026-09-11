@@ -16,6 +16,7 @@ from ..quality.citation_check import finalize
 from ..retrieval.citations import CitationIndex
 from ..retrieval.ports import Evidence
 from .base import NodeContext, accumulate, budget_after, report_budget
+from .memory_loader import profile_block
 
 log = get_logger(__name__)
 NODE = "analyst"
@@ -100,7 +101,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     )
 
     resp = ctx.gateway.chat(
-        build_analyst_messages(objective, outlines, selected, conflicts),
+        build_analyst_messages(objective, outlines, selected, conflicts, profile_block=profile_block(state)),
         task="analyst",
         temperature=0.3,
         fuse_level=fuse,

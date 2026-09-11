@@ -107,6 +107,19 @@ class Settings(BaseSettings):
     audit_rewrite_ratio: float = Field(0.5, alias="ATTEST_AUDIT_REWRITE_RATIO")
     audit_max_rewrites: int = Field(1, alias="ATTEST_AUDIT_MAX_REWRITES")
 
+    # ---------------- P5：记忆与协同（T5.1 ~ T5.5，《功能设计》§4.3 / §7）----------------
+    #: 检查点开关。关掉则退化为"无状态单跑"（P1~P4 的行为），便于对照与排查。
+    checkpoint_enabled: bool = Field(True, alias="ATTEST_CHECKPOINT_ENABLED")
+    #: 检查点 SQLite 路径。CLI 用**同步** `SqliteSaver`；P6 的 FastAPI(async) **必须换**
+    #: `AsyncSqliteSaver`（aiosqlite）——同步 saver 在 async 事件循环里会阻塞（T5.1 硬约束）。
+    checkpoint_db: Path = Field(DATA_DIR / "checkpoints.sqlite", alias="ATTEST_CHECKPOINT_DB")
+    #: 用户画像 SQLite 路径（T5.2）
+    profile_db: Path = Field(DATA_DIR / "profile.sqlite", alias="ATTEST_PROFILE_DB")
+    #: 人工确认大纲开关（T5.4）。关掉 = 直接跳过确认（等价于用户选「跳过」）。
+    human_confirm_enabled: bool = Field(False, alias="ATTEST_HUMAN_CONFIRM")
+    #: 用户画像注入开关（T5.2）
+    profile_enabled: bool = Field(True, alias="ATTEST_PROFILE_ENABLED")
+
     # ---------------- 校验 ----------------
     @model_validator(mode="after")
     def _validate(self) -> "Settings":
@@ -134,6 +147,9 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         for p in (self.trace_dir, self.report_dir, self.fixture_dir):
+            p.mkdir(parents=True, exist_ok=True)
+        # 检查点 / 画像的父目录（SQLite 文件本身由 sqlite 驱动创建）
+        for p in (self.checkpoint_db.parent, self.profile_db.parent):
             p.mkdir(parents=True, exist_ok=True)
 
 

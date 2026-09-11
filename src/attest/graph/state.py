@@ -29,6 +29,13 @@ class GraphState(TypedDict, total=False):
     plan: dict[str, Any]  # 存 dict 而非 Pydantic 实例：便于检查点序列化（P5 复核）
     round: int
     reflect_count: int
+    #: T5.4 人工确认：大纲是否已确认。**resume 重跑时的状态守卫**——`human_confirm`
+    #: 节点首行检查它，避免 interval resume 时重复询问/重复副作用（《功能设计》§4.3 硬性约定）。
+    plan_approved: bool
+    #: T5.4 确认动作留痕：{action: approve|skip|edit}
+    plan_approval: dict[str, Any]
+    #: T5.2 用户画像（跨会话偏好）。memory_loader 是**唯一写入者**，覆盖语义。
+    profile: dict[str, str]
     #: T3.6：reflect 产出的补检任务包（Send payload 列表）。**覆盖语义**——reflect 是唯一写入者。
     #: 放到 state 而不是让路由函数现算，是为了让"为什么补检这几路"在 trace/检查点里可见。
     reflect_targets: list[dict[str, Any]]
@@ -62,6 +69,9 @@ INITIAL_STATE: dict[str, Any] = {
     "round": 1,
     "reflect_count": 0,
     "reflect_targets": [],
+    "plan_approved": False,
+    "plan_approval": {},
+    "profile": {},
     "evidence": [],
     "judgments": [],
     "gaps": [],
