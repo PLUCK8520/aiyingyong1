@@ -1,0 +1,69 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "note": "离线开发用的【合成 fixture】，仅用于在无 API key 时打通链路，不是真实抓取结果。真实 fixture 由 T2.1「Tavily 录制」产出。URL 一律用 IANA 保留域 example.com。",
+    "topic": "大模型推理成本",
+    "topic_keywords": ["推理", "大模型", "token", "模型成本", "降本", "单价", "自建"],
+    "recorded_at": "2026-09-11",
+    "shape": "Tavily search + include_raw_content 的响应字段子集",
+    "conflict_design": "C1 与 C2 在「单价降幅」上互斥：78% vs 45%（口径不同：单一模型 vs 加权均价）。C3 与 C1 在「总成本趋势」上互斥：单价降但总成本升。用于验证「单价 vs 总成本」这类非数值口径冲突的检测。"
+  },
+  "records": [
+    {
+      "keywords": ["推理", "成本", "单价", "降幅", "token", "inference"],
+      "title": "示例研究 · 大模型推理单价变化（2025）",
+      "url": "https://example.com/research/inference-price",
+      "content": "示例研究跟踪主流模型的**单 token 推理单价**（输入侧），2024–2025 年降幅约 78%。降价驱动来自三处：稀疏化推理、KV cache 复用、以及单位算力效率提升。样本数据，仅供链路演示。大模型推理成本是当前应用层最关心的变量之一。",
+      "score": 0.94
+    },
+    {
+      "keywords": ["推理", "成本", "单价", "降幅", "争议", "token"],
+      "title": "示例咨询 · 加权均价的另一套测算",
+      "url": "https://example.com/research/inference-weighted",
+      "content": "示例咨询按**调用量加权**计算平均单价，得出降幅约 45%——远低于单一模型的 78%。原因：高价值场景（长上下文、推理型任务）的用量占比在上升，而这类任务的单价降幅最小。两套口径说明「单价降了多少」取决于你问的是哪个模型、哪个场景。样本数据，仅供链路演示。",
+      "score": 0.91
+    },
+    {
+      "keywords": ["推理", "成本", "总成本", "趋势", "争议", "cost"],
+      "title": "示例证券 · 单价降了，账单为什么没降",
+      "url": "https://example.com/research/inference-total",
+      "content": "虽然推理单价大幅下降，但企业**推理总支出**同期上升约 60%。原因是任务复杂度提升（更多多步 Agent 编排与长链推理）抵消了单价下降。这是推理成本讨论里最常见的误读：把单价趋势直接当成总成本趋势。样本数据，仅供链路演示。",
+      "score": 0.9
+    },
+    {
+      "keywords": ["推理", "成本", "优化", "对比", "缓存", "optimize"],
+      "title": "示例工程笔记 · 三类降本手段的实际收益",
+      "url": "https://example.com/research/inference-optimize",
+      "content": "对比三类降本手段：① 提示词缓存（命中部分按更低价计费，收益 20%–60%，取决于重复度）；② 模型路由（简单任务走小模型，收益 30%–70%，但需评估质量损失）；③ 输出长度控制（收益 10%–25%，最易实现）。三者可叠加。样本数据，仅供链路演示。",
+      "score": 0.89
+    },
+    {
+      "keywords": ["推理", "成本", "自建", "GPU", "对比", "selfhost"],
+      "title": "示例产业观察 · 自建推理 vs 调用 API",
+      "url": "https://example.com/research/inference-selfhost",
+      "content": "自建推理的盈亏平衡点取决于利用率：GPU 利用率低于约 30% 时，调用 API 更便宜；高于 60% 时自建开始有优势。多数企业的真实利用率在 15%–25% 区间，因此「自建省钱」在中小规模下通常不成立。样本数据，仅供链路演示。",
+      "score": 0.88
+    },
+    {
+      "keywords": ["推理", "成本", "延迟", "对比", "吞吐", "latency"],
+      "title": "示例技术评论 · 成本与延迟的权衡",
+      "url": "https://example.com/research/inference-latency",
+      "content": "降本手段几乎都会推高延迟：模型路由增加一次判别开销，量化推理降低单 token 速度。实测中，量化到 INT8 可使成本降约 40%，但首 token 延迟增加 15%–30%。是否可接受，取决于场景是「交互式」还是「批处理」。样本数据，仅供链路演示。",
+      "score": 0.87
+    },
+    {
+      "keywords": ["推理", "成本", "落地", "案例", "行业", "adoption"],
+      "title": "示例调研 · 不同场景的成本敏感度",
+      "url": "https://example.com/research/inference-scenarios",
+      "content": "抽样统计显示：客服问答场景单次对话成本约 0.02–0.08 元，对成本最敏感；深度研究类场景单份产出成本约 3–15 元，对成本相对不敏感但对质量极度敏感。这个差异决定了降本手段应优先用在哪个场景。样本数据，仅供链路演示。",
+      "score": 0.86
+    },
+    {
+      "keywords": ["推理", "成本", "合规", "数据", "私有化", "compliance"],
+      "title": "示例合规观察 · 推理链路的可审计要求",
+      "url": "https://example.com/research/inference-compliance",
+      "content": "金融与政企客户要求推理链路可审计：每次调用需记录模型版本、输入输出摘要与计费依据。这本身会产生可观的存储与计算开销，通常被低估。样本数据，仅供链路演示。",
+      "score": 0.84
+    }
+  ]
+}
