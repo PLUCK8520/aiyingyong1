@@ -1,15 +1,17 @@
-"""T1.5 / T3.5 / T3.6 · 图组装：节点 + 条件边 + Send 动态扇出 + 反思循环。
+"""T1.5 / T3.5 / T3.6 / T5.1 / T5.4 · 图组装：节点 + 条件边 + Send 动态扇出 + 反思循环 + 人工确认。
 
-流程（P3 形态）：
+流程（P5 形态）：
 
-    START → intent_router ─┬─ direct  → direct_responder → END
-                           └─ research → planner ─(Send 扇出 2N 路)→ scout_web ⤵
-                                                                     scout_local ⤵
-                                                     evidence_judge（判定+缺口+矛盾）
-                                                          ↓
-                                                       reflect ─有缺口且未超轮且未熔断→ 再扇出 2N 路
-                                                          ↓ 否则
-                                                       analyst → auditor（引用审计+降级）→ END
+    START → memory_loader → intent_router ─┬─ direct  → direct_responder → END
+                                           └─ research → planner ⏸（静态断点 interrupt_before）
+                                                        → human_confirm（放行/编辑后继续）
+                                                        → (Send 扇出 2N 路) scout_web ⤵
+                                                                             scout_local ⤵
+                                                             evidence_judge（判定+缺口+矛盾）
+                                                                  ↓
+                                                               reflect ─有缺口且未超轮且未熔断→ 再扇出 2N 路
+                                                                  ↓ 否则
+                                                               analyst → auditor（引用审计+降级）→ END
 
 关键点：
   - `scout_web` / `scout_local` 是 Send 的目标节点，入参是**单个子问题包**（不是全量 state）；
@@ -17,6 +19,13 @@
   - 反思循环用 `reflect_targets` 驱动：`reflect` 是唯一写入者，路由函数是纯读，
     所以"补检哪几路、为什么"在 state/trace 里都可回查。
   - `Send` 一律 `from langgraph.types`（1.x 的 `langgraph.graph` 不再导出，P-1 实测）。
+  - **T5.4 人工确认 = 编译期静态断点**（2026-09-11 重写）：
+    `build_graph(..., interrupt_before=["human_confirm"])`。断点由 `should_interrupt()`
+    在**节点执行前**判定，不依赖 `interrupt()` 的 scratchpad 时序。
+    ⚠️ 09-10 那版用「节点内 `interrupt()`」，会因 `RESUME` 残留写 + 版本单调递增
+    被**静默放行**（详见 `agents/human_confirm.py` 模块文档串），已废弃。
+    恢复方式：`invoke(None, cfg)` 停在断点 / `invoke(Command(resume=...), cfg)` 放行。
+  - **T5.1 检查点**：`build_graph(ctx, checkpointer=...)`；不传则退化为无状态单跑（P1~P4 行为）。
 """
 
 from __future__ import annotations
@@ -31,7 +40,9 @@ from ..agents import (
     auditor,
     direct_responder,
     evidence_judge,
+    human_confirm,
     intent_router,
+    memory_loader,
     planner,
     reflect,
     scout_local,
@@ -43,6 +54,7 @@ from ..budget.account import BudgetConfig
 from ..config import DATA_DIR, Settings
 from ..llm.gateway import LLMGateway
 from ..logging import get_logger
+from ..memory.profile import ProfileStore
 from ..quality.citation_auditor import make_citation_auditor
 from ..retrieval.local_search import make_local_client as build_local_client
 from ..retrieval.mock_search import FixtureSearchClient
@@ -142,6 +154,10 @@ def build_context(
         local=local if local is not None else make_local_search_client(settings, gateway),
         auditor=make_citation_auditor(settings, gateway),
         trace=trace,
+        # T5.2：画像存储。关闭时传 None，`memory_loader` 会如实留痕并返回空画像。
+        profile=ProfileStore(settings.profile_db, enabled=settings.profile_enabled)
+        if settings.profile_enabled
+        else None,
         budget=BudgetConfig(
             total_cny=settings.budget_total_cny,
             total_tokens=settings.budget_total_tokens,
@@ -197,12 +213,36 @@ def route_after_reflect(state: GraphState) -> str | list[Send]:
 # ------------------------------------------------------------------ 组装
 
 
-def build_graph(ctx: NodeContext, *, checkpointer: Any = None):
+def build_graph(
+    ctx: NodeContext,
+    *,
+    checkpointer: Any = None,
+    interrupt_before: Any = None,
+):
+    """组装并编译图。
+
+    Args:
+        ctx: 节点上下文（依赖注入）。
+        checkpointer: 检查点后端；不传 = 无状态单跑（P1~P4 行为）。
+        interrupt_before: 编译期静态断点节点名列表。
+            `None`（默认）→ 读 `ctx.settings.human_confirm_enabled`：
+                True  → `["human_confirm"]`（T5.4 人工确认大纲）；
+                False → 不断点，`human_confirm` 会走 `auto_approval` 直接放行。
+            显式传空列表 `[]` → 强制不断点（测试用）。
+    """
+    if interrupt_before is None:
+        enabled = bool(getattr(ctx.settings, "human_confirm_enabled", False))
+        interrupt_before = ["human_confirm"] if enabled else []
+        if enabled:
+            log.info("[graph] 人工确认已开启：编译期静态断点 interrupt_before=['human_confirm']")
+
     g = StateGraph(GraphState)
 
+    g.add_node("memory_loader", bind(memory_loader.run, name="memory_loader", ctx=ctx))
     g.add_node("intent_router", bind(intent_router.run, name="intent_router", ctx=ctx))
     g.add_node("direct_responder", bind(direct_responder.run, name="direct_responder", ctx=ctx))
     g.add_node("planner", bind(planner.run, name="planner", ctx=ctx))
+    g.add_node("human_confirm", bind(human_confirm.run, name="human_confirm", ctx=ctx))
     g.add_node("scout_web", bind(scout_web.run, name="scout_web", ctx=ctx))
     g.add_node("scout_local", bind(scout_local.run, name="scout_local", ctx=ctx))
     g.add_node("evidence_judge", bind(evidence_judge.run, name="evidence_judge", ctx=ctx))
@@ -210,9 +250,13 @@ def build_graph(ctx: NodeContext, *, checkpointer: Any = None):
     g.add_node("analyst", bind(analyst.run, name="analyst", ctx=ctx))
     g.add_node("auditor", bind(auditor.run, name="auditor", ctx=ctx))
 
-    g.add_edge(START, "intent_router")
+    g.add_edge(START, "memory_loader")
+    g.add_edge("memory_loader", "intent_router")
     g.add_conditional_edges("intent_router", route_after_intent, ["direct_responder", "planner"])
-    g.add_conditional_edges("planner", fanout_sub_questions, list(SCOUT_NODES))
+    g.add_edge("planner", "human_confirm")
+    # T5.4：确认后进入首轮扇出。**必须是条件边**——`fanout_sub_questions` 返回 `Send` 列表
+    # 做动态并行，而普通 `add_edge` 不支持 Send（只有条件边的路径函数能产出 Send）。
+    g.add_conditional_edges("human_confirm", fanout_sub_questions, list(SCOUT_NODES))
     g.add_edge("scout_web", "evidence_judge")
     g.add_edge("scout_local", "evidence_judge")
     g.add_edge("evidence_judge", "reflect")
@@ -223,7 +267,7 @@ def build_graph(ctx: NodeContext, *, checkpointer: Any = None):
     g.add_edge("auditor", END)
     g.add_edge("direct_responder", END)
 
-    return g.compile(checkpointer=checkpointer)
+    return g.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
 
 
 def initial_state(query: str, thread_id: str = "local") -> dict[str, Any]:
@@ -233,9 +277,11 @@ def initial_state(query: str, thread_id: str = "local") -> dict[str, Any]:
 def graph_node_sequence() -> list[str]:
     """图里必须出现的节点（冒烟断言用）。"""
     return [
+        "memory_loader",
         "intent_router",
         "direct_responder",
         "planner",
+        "human_confirm",
         "scout_web",
         "scout_local",
         "evidence_judge",
