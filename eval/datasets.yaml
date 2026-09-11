@@ -1,0 +1,224 @@
+# T7.1 · 正式评测集（14 题）
+#
+# 四类题目（每类都有明确的"要测什么"）：
+#   fact      事实型   —— 考证据定位与引用准确性（数字必须能回查）
+#   compare   对比型   —— 考多主体并列时的证据区分（别把 A 的证据用在 B 上）
+#   dispute   争议型   —— 考矛盾检测与口径呈现（**刻意埋了互斥数值**）
+#   local     本地知识 —— 考本地语料与网络语料的口径冲突（同一事实两套数字）
+#
+# 字段说明：
+#   expect_route        direct | research（意图分流断言）
+#   expect_conflict     报告是否应报出矛盾（需真存在互斥数值，检验"宁缺毋滥"）
+#   expect_min_rounds   最少检索轮次（验证 Reflect 补检真的被触发）
+#   expect_gaps_min     最少缺口数（验证缺口识别）
+#   gold_points         人工标注的标准答案要点（**主观指标的校准基准**，见下）
+#
+# ⚠️ 关于 gold_points 的诚实声明：
+#   每条要点都是**作者依据 fixture 语料人工标注**的，不是第三方权威答案。
+#   它的用途有二：① 给"大纲覆盖度"这类主观指标一个可核对的锚；
+#   ② 让"报告是否答到了点子上"从主观感受变成可复现的判定。
+#   它**不能**用来对外声称"准确率 XX%"——那是自洽基线的数字，不是独立评测。
+#
+# ⚠️ 关于 expect_conflict 的设计约束：
+#   标 true 的题，fixture 里必须**真存在**互斥数值，且两者都该被检出（不是只报一个）。
+#   标 false 的题，是**反向检验**——用来抓"把不同口径的正常差异误报成矛盾"的假阳性。
+#   假阳性比漏报更伤信任，所以负例题（dispute-N）与正例题（dispute-Y）数量要相当。
+
+meta:
+  version: 1
+  built_at: "2026-09-11"
+  cases: 15
+  by_kind: {fact: 5, compare: 4, dispute: 3, local: 3}
+  #: 直答题（F/Q 之外的 route=direct）单列，不进 research 指标分母
+  direct_cases: [Q1]
+  #: 矛盾检测的**正负样例配比**（负例用来抓假阳性——把口径差异误报成矛盾）
+  conflict_positive: [F1, F2, F3, F4, D1, D2, D3]
+  conflict_negative: [C1, C2, C3, C4, L1, L2, L3]
+  topics: [企业知识库 Agent 平台, 新能源汽车出海, 大模型推理成本, 国产数据库替代]
+  note: "全部离线（mock LLM + fixture 检索）。指标用于横向自比与回归，不与外部系统比。"
+  mock_caveat: "正文由脚本生成，token 成本受 mock 提示词长度驱动，**不代表真实模型成本**。"
+
+cases:
+  # ---------------------------------------------------------------- 事实型（4）
+  - id: F1
+    kind: fact
+    topic: 企业知识库 Agent 平台
+    query: "调研'企业知识库 Agent 平台'的市场规模，说明统计口径与增速"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "含交付口径：约 180 亿元，2023–2025 复合增速约 42%"
+      - "仅平台软件口径：约 62 亿元，增速约 38%"
+      - "必须说明两个数字的口径差异，而非只报一个"
+    note: "同一事实的两套口径，考'会不会只报一个数'"
+
+  - id: F2
+    kind: fact
+    topic: 新能源汽车出海
+    query: "调研'新能源汽车出海'的出口规模与增速"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "整车出口口径：约 210 万辆，同比增速约 32%"
+      - "仅乘用车口径：约 175 万辆"
+      - "出口均价约 2.1 万美元"
+    note: "出口量两套口径（整车 vs 乘用车）"
+
+  - id: F3
+    kind: fact
+    topic: 大模型推理成本
+    query: "调研'大模型推理成本'的单价降幅，说明统计口径"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "单一模型输入侧单价降幅约 78%"
+      - "按调用量加权后降幅约 45%"
+      - "两套口径差异的原因是高价值场景用量占比上升"
+    note: "单价降幅两套口径（单模型 vs 加权）"
+
+  - id: F4
+    kind: fact
+    topic: 国产数据库替代
+    query: "调研'国产数据库替代'的替代率与统计口径"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "新增业务系统口径：约 35%"
+      - "存量核心系统口径：约 18%"
+      - "两者分母不同，金融核心系统替换进度明显滞后"
+    note: "替代率两套口径（新增 vs 存量）"
+
+  # ---------------------------------------------------------------- 对比型（4）
+  - id: C1
+    kind: compare
+    topic: 企业知识库 Agent 平台
+    query: "对比'企业知识库 Agent 平台'三类厂商（云厂商系/独立创业公司/传统软件商）的差异化优势"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "云厂商系：强在弹性与生态，一体化托管"
+      - "独立创业公司：强在检索与编排深度，弱在交付与合规资质"
+      - "传统软件商转型：强在存量客户与私有化交付，弱在模型能力"
+    note: "三类并列，考证据不串台"
+
+  - id: C2
+    kind: compare
+    topic: 新能源汽车出海
+    query: "对比'新能源汽车出海'三种落地路线（整车出口/本地建厂/技术授权）在关税应对上的差异"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "整车出口型：轻资产但受关税冲击大"
+      - "本地建厂型：重资产，可规避关税并贴近市场"
+      - "技术授权型：输出平台与三电技术，不直接卖车"
+    note: "三类路线并列"
+
+  - id: C3
+    kind: compare
+    topic: 大模型推理成本
+    query: "对比'大模型推理成本'三类降本手段（提示词缓存/模型路由/输出长度控制）的收益区间"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "提示词缓存：收益 20%–60%，取决于请求重复度"
+      - "模型路由：收益 30%–70%，需评估质量损失"
+      - "输出长度控制：收益 10%–25%，最易实现"
+      - "三者可叠加"
+    note: "三类手段并列，考区间数字不混淆"
+
+  - id: C4
+    kind: compare
+    topic: 国产数据库替代
+    query: "对比'国产数据库'四类厂商（开源分支型/自研内核型/云厂商系/垂直场景型）的差异"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "开源分支型：基于 PG/MySQL 分支，生态兼容好"
+      - "自研内核型：完全自主，生态与工具链需自建"
+      - "云厂商系：强在托管与弹性，弱在私有化"
+      - "垂直场景型：面向时序/图/OLAP 等专用场景"
+    note: "四类厂商并列"
+
+  # ---------------------------------------------------------------- 争议型（3）
+  # 负例：这两题**不应**报矛盾（考假阳性控制）
+  - id: D1
+    kind: dispute
+    topic: 新能源汽车出海
+    query: "调研'新能源汽车出海'在欧洲市场的份额，按不同统计口径分别说明"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "含插混、按发货地：约 12%"
+      - "仅纯电、按注册地：约 8.5%"
+      - "该差异恰好卡在'是否突破 10%'两侧，结论对口径极敏感"
+    note: "欧洲份额两套口径（含插混/仅纯电）"
+
+  - id: D2
+    kind: dispute
+    topic: 国产数据库替代
+    query: "调研'国产数据库'迁移项目的成功率，说明不同成功定义下的差异"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "一次迁移成功（无回滚）：约 61%"
+      - "两次内成功：约 82%"
+      - "失败主因：存储过程改写遗漏、工具链缺失、压测不足"
+    note: "成功率两套定义（一次成功 / 两次内成功）"
+
+  - id: D3
+    kind: dispute
+    topic: 大模型推理成本
+    query: "调研'大模型推理成本'的总成本变化趋势，并说明它与单价趋势的关系"
+    expect_route: research
+    expect_conflict: true
+    gold_points:
+      - "单价降约 78%，但企业推理总支出同期上升约 60%"
+      - "原因是任务复杂度提升抵消了单价下降"
+      - "这是本领域最高频的误读"
+    note: "单价趋势 vs 总成本趋势，方向相反"
+
+  # ---------------------------------------------------------------- 本地知识（3）
+  - id: L1
+    kind: local
+    topic: 企业知识库 Agent 平台
+    query: "结合内部笔记说明'企业知识库 Agent 平台'报价中软件许可的占比，以及私有化场景下按席位报价为何失效"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "私有化项目里软件许可通常只占 30%–40%"
+      - "其余是模型推理硬件、实施人力与运维"
+      - "按席位报价在私有化场景失效：客户买的是交付结果不是席位"
+    note: "本地语料 local_deployment_lessons / local_pricing_playbook"
+
+  - id: L2
+    kind: local
+    topic: 大模型推理成本
+    query: "结合内部笔记说明'大模型推理成本'自建与调用 API 的盈亏平衡点，以及该阈值为何与外部报道不同"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "GPU 利用率低于约 30% 时调用 API 更便宜，高于 60% 自建才有优势"
+      - "企业实际利用率多在 15%–25%，故中小规模下'自建省钱'通常不成立"
+      - "该阈值是内部测算口径，与外部报道引用的数字口径不同，不可混用"
+    note: "**关键**：本地笔记明确说'该阈值口径与外部不同'，考会不会混用"
+
+  - id: L3
+    kind: local
+    topic: 国产数据库替代
+    query: "结合内部笔记说明'国产数据库'分行业替代率，以及金融数字在不同口径下的差异"
+    expect_route: research
+    expect_conflict: false
+    gold_points:
+      - "政务约 42%、金融约 25%、制造约 14%"
+      - "金融 25% 用的是全量系统口径"
+      - "与'存量核心系统 18%'分母不同，不可混用"
+    note: "**关键**：本地笔记明确警告两个金融数字不可混用"
+
+  # ---------------------------------------------------------------- 直答型（1）
+  - id: Q1
+    kind: fact
+    topic: 通用
+    query: "你好，用一句话说明什么是向量检索。"
+    expect_route: direct
+    expect_conflict: false
+    note: "轻问题走直答，不检索、不产出报告 —— 用于验证分流与'不浪费额度'"
