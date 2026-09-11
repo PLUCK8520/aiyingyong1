@@ -96,6 +96,10 @@ python scripts/chat.py --profile                               # 查看当前画
 
 ## Roadmap
 
+**P6 后端已交付**（2026-09-11）：`app/session.py` + `app/main.py`，8 个路由，
+SSE 支持 `Last-Event-ID` 断线重连。起服务：`uvicorn app.main:app --port 8000`，
+API 文档 `/docs`。验证：`pytest` 114 passed / `scripts/api_smoke.py` 36 项全通过（详见开发任务清单 P6 节）。
+
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P-1 | 环境预检（Python 3.13 依赖实测） | ✅ |
@@ -105,7 +109,7 @@ python scripts/chat.py --profile                               # 查看当前画
 | P3 | 本地混合检索 + 动态并行 + 反思循环 + 矛盾检测 + **最小评测尺子** | ✅ |
 | P4 | 引用审计 + 预算熔断 + 模型路由 | ✅ |
 | P5 | 三层记忆 + 人工确认 + 断点续跑 | ✅ |
-| P6 | Web 工作台（SSE / 时间线 / 成本面板） | ⬜ |
+| P6 | Web 工作台（SSE / 时间线 / 成本面板） | 🟡 后端已完成（T6.1/T6.2），前端待开发 |
 | P7 | 评测流水线（含 baseline）/ 研究闭环 / 追问模式 / 图表导出 | ⬜ |
 
 > 图例：✅ 已交付（有测试/冒烟证据，tag 见 `p0`–`p5`）· ⬜ 待开发。
