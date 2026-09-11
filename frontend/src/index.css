@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-fg-muted;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-surface border border-border rounded-xl;
+  }
+
+  .dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full;
+  }
+
+  .btn {
+    @apply inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm
+           font-medium transition-colors duration-150 disabled:cursor-not-allowed
+           disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-bg hover:bg-accent/90;
+  }
+  .btn-ghost {
+    @apply btn border border-border text-fg-muted hover:bg-muted hover:text-fg;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg
+           placeholder:text-fg-muted/60 focus:border-accent/60 focus:outline-none;
+  }
+
+  .report-body {
+    @apply text-[13.5px] leading-[1.75] text-fg;
+  }
+  .report-body h1 {
+    @apply mb-3 mt-6 text-lg font-medium text-fg first:mt-0;
+  }
+  .report-body h2 {
+    @apply mb-2 mt-5 text-base font-medium text-fg;
+  }
+  .report-body h3 {
+    @apply mb-2 mt-4 text-sm font-medium text-fg;
+  }
+  .report-body p {
+    @apply my-2;
+  }
+  .report-body ul,
+  .report-body ol {
+    @apply my-2 space-y-1 pl-5;
+  }
+  .report-body ul {
+    @apply list-disc;
+  }
+  .report-body ol {
+    @apply list-decimal;
+  }
+  .report-body a {
+    @apply text-info underline decoration-info/40 underline-offset-2 hover:decoration-info;
+  }
+  .report-body code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-accent;
+  }
+  .report-body pre {
+    @apply my-3 overflow-x-auto rounded-lg bg-bg p-3 font-mono text-[12px];
+  }
+  .report-body blockquote {
+    @apply my-3 border-l-2 border-border pl-3 text-fg-muted;
+  }
+  .report-body table {
+    @apply my-3 w-full border-collapse text-[12.5px];
+  }
+  .report-body th,
+  .report-body td {
+    @apply border border-border px-2 py-1 text-left;
+  }
+  .report-body hr {
+    @apply my-4 border-border;
+  }
+}
