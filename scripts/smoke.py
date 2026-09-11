@@ -1,5 +1,6 @@
-"""T0.6 / T3.11 / T4.5 · 冒烟脚本：一条命令验证
-「网关能调通 + trace 完整 + 节点成对 + P3 双源与矛盾 + P4 引用审计与降级」。
+"""T0.6 / T3.11 / T4.5 / T5.6 · 冒烟脚本：一条命令验证
+「网关能调通 + trace 完整 + 节点成对 + P3 双源与矛盾 + P4 引用审计与降级
+ + P5 检查点/画像/静态断点/断点续跑」。
 
 用法：
     .venv/Scripts/python.exe scripts/smoke.py
@@ -20,7 +21,7 @@ from attest.agents import auditor as auditor_node  # noqa: E402
 from attest.agents.analyst import truncate_topk  # noqa: E402
 from attest.agents.auditor import _with_fuse_banner  # noqa: E402
 from attest.config import load_settings  # noqa: E402
-from attest.graph.build import build_context, build_graph, initial_state  # noqa: E402
+from attest.graph.build import build_context, build_graph, graph_node_sequence, initial_state  # noqa: E402
 from attest.graph.state import reducer_fields_ok  # noqa: E402
 from attest.llm.prompts import build_direct_messages  # noqa: E402
 from attest.llm.router import ModelRouter  # noqa: E402
@@ -39,6 +40,91 @@ def check(label: str, ok: bool, detail: str = "") -> None:
     print(f"[{'OK' if ok else 'FAIL'}] {label}{(' -> ' + detail) if detail else ''}")
     if not ok:
         failures.append(label)
+
+
+def _smoke_p5(settings) -> None:
+    """T5.6 · P5 冒烟：检查点持久化 + 画像跨会话 + 静态断点 + 冷启动续跑不重复检索。
+
+    独立用临时 SQLite（不污染 data/ 下的真库），跑完即删。
+    """
+    import shutil
+    import tempfile
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    from attest.memory.profile import ProfileStore
+
+    tmp = Path(tempfile.mkdtemp(prefix="smoke-p5-"))
+    s = settings.model_copy(
+        update={
+            "checkpoint_db": tmp / "cp.sqlite",
+            "profile_db": tmp / "profile.sqlite",
+            "human_confirm_enabled": True,
+        }
+    )
+    s.ensure_dirs()
+
+    # --- T5.2 画像：写入 → 跨 thread 注入 ---
+    store = ProfileStore(s.profile_db)
+    store.set("输出语言", "中文")
+    store.set("关注点", "成本控制")
+
+    def _scout_starts(c) -> int:
+        return sum(
+            1 for e in c.trace.of("node_start")
+            if str(e.get("node", "")).startswith("scout_")
+        )
+
+    # --- T5.1 + T5.4：挂起在静态断点，且断点前不检索 ---
+    with SqliteSaver.from_conn_string(str(s.checkpoint_db)) as cp:
+        c1 = build_context(s, run_id="smoke-p5-a")
+        a1 = build_graph(c1, checkpointer=cp)
+        cfg = {"configurable": {"thread_id": "smoke-p5"}}
+        a1.invoke(initial_state(QUERY, thread_id="smoke-p5"), cfg)
+        snap1 = a1.get_state(cfg)
+        check("[P5] T5.4 静默断点挂起在 human_confirm 之前", "human_confirm" in (snap1.next or ()),
+              f"next={list(snap1.next)}")
+        check("[P5] T5.4 断点前不发生检索（不白烧额度）", _scout_starts(c1) == 0,
+              f"scout={_scout_starts(c1)}")
+        check("[P5] T5.4 断点前不产出报告", not (snap1.values or {}).get("report"))
+        prof1 = (snap1.values or {}).get("profile") or {}
+        check("[P5] T5.2 画像已注入 state", prof1.get("输出语言") == "中文",
+              f"profile={sorted(prof1)}")
+        check("[P5] T5.1 检查点已持久化 plan",
+              bool((snap1.values or {}).get("plan")),
+              f"outlines={len((( snap1.values or {}).get('plan') or {}).get('outlines') or [])}")
+
+    # --- T5.5：冷启动（新连接 + 新编译图），只靠 SQLite 恢复 ---
+    with SqliteSaver.from_conn_string(str(s.checkpoint_db)) as cp:
+        c2 = build_context(s, run_id="smoke-p5-b")
+        a2 = build_graph(c2, checkpointer=cp)
+        cfg = {"configurable": {"thread_id": "smoke-p5"}}
+        snap2 = a2.get_state(cfg)
+        recovered = snap2.values or {}
+        check("[P5] T5.5 冷启动从 SQLite 恢复出 plan", bool(recovered.get("plan")))
+        check("[P5] T5.5 冷启动仍停在断点", "human_confirm" in (snap2.next or ()),
+              f"next={list(snap2.next)}")
+
+        a2.update_state(cfg, {"plan_approval": {"action": "approve"}}, as_node="planner")
+        out = a2.invoke(None, cfg)
+        check("[P5] T5.4 放行后产出报告", bool(out.get("report")),
+              f"{len(out.get('report') or '')} 字")
+        n_sub = len((recovered.get("plan") or {}).get("sub_questions") or [])
+        expected = max(n_sub, 1) * 2
+        check("[P5] T5.5 续跑不重复检索（FR-24）", _scout_starts(c2) == expected,
+              f"scout={_scout_starts(c2)} 期望={expected}")
+
+    # --- T5.2 跨 thread 再跑一次，画像仍生效（模板 demo 7）---
+    c3 = build_context(s, run_id="smoke-p5-c")
+    a3 = build_graph(c3)
+    out3 = a3.invoke(initial_state(QUERY, thread_id="smoke-p5-other"))
+    prof3 = out3.get("profile") or {}
+    check("[P5] T5.2 换 thread 画像仍生效（跨会话）",
+          prof3.get("输出语言") == "中文" and prof3.get("关注点") == "成本控制",
+          f"profile={sorted(prof3)}")
+
+    # 清理临时库
+    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main() -> int:
@@ -190,6 +276,16 @@ def main() -> int:
         not direct.get("evidence"),
         f"evidence={len(direct.get('evidence') or [])}",
     )
+
+    # ---------------- P5：记忆与协同（T5.1 / T5.2 / T5.4 / T5.5）----------------
+    # ⚠️ 这里不断言"profile 字段存在"——那是个假断言（空 dict 也算存在，测不出东西）。
+    # 真正的画像注入在下方 `_smoke_p5` 里用**有画像的库**断言。
+    # 此处只钉住图的入口形态：memory_loader 必须在节点序列里（否则画像永远注入不进去）。
+    check("[P5] memory_loader 已接入图入口（T5.2）",
+          "memory_loader" in graph_node_sequence(),
+          f"nodes={graph_node_sequence()[:2]}...")
+
+    _smoke_p5(settings)
 
     summary = trace.summary()
     check("node_start / node_end 全部成对", summary["node_pairs_ok"], str(summary["unmatched_nodes"]))

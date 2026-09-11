@@ -82,6 +82,16 @@ make dev
 
 CLI 方式：`python scripts/chat.py "你的调研问题"`
 
+CLI 会话与记忆（P5）：
+```bash
+python scripts/chat.py --confirm --thread my-session "调研…"   # 打开大纲确认（人工介入）
+python scripts/chat.py --thread my-session --resume            # 从断点续跑（进程重启后）
+python scripts/chat.py --remember "输出语言=中文"               # 写入用户画像（跨会话生效）
+python scripts/chat.py --profile                               # 查看当前画像
+```
+> ⚠️ 大纲确认走**编译期静态断点**：续跑是 `update_state` + `invoke(None)`，
+> 不是 `Command(resume=...)`（后者在静态断点下无处投递，会静默沿用旧大纲）。详见 `agents/human_confirm.py`。
+
 测试：`pytest`（默认离线、不消耗 API 额度）
 
 ## Roadmap
@@ -94,12 +104,12 @@ CLI 方式：`python scripts/chat.py "你的调研问题"`
 | P2 | 网络检索 MVP + 证据判别 + 引用报告 + Tavily 录制回放 | ✅ |
 | P3 | 本地混合检索 + 动态并行 + 反思循环 + 矛盾检测 + **最小评测尺子** | ✅ |
 | P4 | 引用审计 + 预算熔断 + 模型路由 | ✅ |
-| P5 | 三层记忆 + 人工确认 + 断点续跑 | ⬜ |
+| P5 | 三层记忆 + 人工确认 + 断点续跑 | ✅ |
 | P6 | Web 工作台（SSE / 时间线 / 成本面板） | ⬜ |
 | P7 | 评测流水线（含 baseline）/ 研究闭环 / 追问模式 / 图表导出 | ⬜ |
 
-> 图例：✅ 已交付（有测试/冒烟证据，tag 见 `p0`–`p4`）· ⬜ 待开发。
-> 说明：P-1/P0/P1/P2 四阶段在早期合并于同一提交（`3bb03c2`），故 `git tag` 中 `p0`/`p1`/`p2` 指向同一提交，标注为补打；`p3`/`p4` 为各自阶段的独立交付点。**所有已交付阶段的验证均在离线 mock 下完成（真实 API 未消耗额度）。**
+> 图例：✅ 已交付（有测试/冒烟证据，tag 见 `p0`–`p5`）· ⬜ 待开发。
+> 说明：P-1/P0/P1/P2 四阶段在早期合并于同一提交（`3bb03c2`），故 `git tag` 中 `p0`/`p1`/`p2` 指向同一提交，标注为补打；`p3`/`p4`/`p5` 为各自阶段的独立交付点。**所有已交付阶段的验证均在离线 mock 下完成（真实 API 未消耗额度）。**
 
 **交付线**：P2 可演示 / **P5 可讲**（面试技术面底线，CLI + 录屏）/ **P6 可投递**（写进简历）。
 
