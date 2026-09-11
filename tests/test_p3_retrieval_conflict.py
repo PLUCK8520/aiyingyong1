@@ -21,6 +21,7 @@ import pytest
 
 from attest.agents.evidence_judge import _dedupe_conflicts
 from attest.agents.reflect import targets_from_gaps
+from attest.llm.providers import _primary_number
 from attest.quality.audit import extract_claims, verify_claim
 from attest.quality.conflict import Pair, group_by_sub_question, select_pairs
 from attest.retrieval.hybrid import BM25Retriever, rrf_fuse, tokenize
@@ -300,3 +301,80 @@ def test_dedupe_conflicts_drops_exact_repeat_across_rounds() -> None:
     c = _cf("市场规模", "规模约 180 亿元", "[WEB1-1-1]")
     kept = _dedupe_conflicts([c], [c])
     assert kept == [], "跨轮完全相同应被去掉"
+
+
+def test_dedupe_conflicts_ignores_sub_question_bucket() -> None:
+    """**T7.2 实测缺陷**：同一处分歧被不同扇出分支各报一次 → 应合并为 1 条。
+
+    `topic` / `sub_question` 是**扇出分支名**，不是争议的身份。词法检索把同一条证据
+    塞进多个分支时，同一个"45% vs 78%"会在 3 个分支各报一次，`conflicts` 从 1 虚增到 3。
+    """
+    a = _cf("大模型推理成本的市场规模与增长情况", "降幅约 45%", "[WEB1-1-2]",
+            cb="降幅约 78%", sb="[LOC1-1-1]")
+    b = _cf("大模型推理成本的主要参与方与竞争格局", "降幅约 45%", "[WEB1-2-2]",
+            cb="降幅约 78%", sb="[LOC1-2-1]")
+    c = _cf("大模型推理成本的收费模式与落地成本", "降幅约 45%", "[WEB1-3-3]",
+            cb="降幅约 78%", sb="[LOC1-3-2]")
+    kept = _dedupe_conflicts([a, b, c], [])
+    assert len(kept) == 1, f"同一处分歧跨分支应合并为 1 条，实际 {len(kept)}"
+
+
+def test_dedupe_conflicts_ignores_citation_ids_per_branch() -> None:
+    """**T7.2 实测缺陷（更隐蔽）**：每个扇出分支有**自己的编号空间**——
+
+    同一份文档被 3 个分支检索到会拿到 3 个不同编号（`WEB1-1-2` / `WEB1-2-2` / `WEB1-3-3`）。
+    若去重键含引用编号，就会把它们当成 3 条不同证据，计数再次虚增。
+    所以键必须建立在**原话内容**上，而非编号上。这里两边编号全不同、原话相同 → 应合并。
+    """
+    x = _cf("甲分支", "降幅约 45%", "[WEB1-1-2]", cb="降幅约 78%", sb="[LOC1-1-1]")
+    y = _cf("乙分支", "降幅约 45%", "[WEB2-7-9]", cb="降幅约 78%", sb="[LOC4-5-6]")
+    kept = _dedupe_conflicts([x, y], [])
+    assert len(kept) == 1, f"编号不同但原话相同应合并，实际 {len(kept)}"
+
+
+def test_dedupe_conflicts_tolerates_whitespace_and_markup() -> None:
+    """同一份文档在不同分支被 `_snippet` 截断/清洗后可能带不同空白或 markdown 残留，
+
+    规范化后应仍能识别为同一处。这条防的是"去重键对格式过敏"。
+    """
+    x = _cf("甲", "降幅约 45%", "[W1]", cb="降幅约 78%", sb="[L1]")
+    y = _cf("乙", "降幅约 **45%**", "[W2]", cb="降幅约 `78%` ", sb="[L2]")
+    kept = _dedupe_conflicts([x, y], [])
+    assert len(kept) == 1, f"仅格式差异应合并，实际 {len(kept)}"
+
+
+# --------------------------------------------- T3.7 主数值抽取（T7.2 实测校准）
+
+def test_primary_number_takes_first_not_largest() -> None:
+    """**T7.2 实测缺陷**：口径对比类资料里，第二份资料几乎总会**引述第一份的数字**。
+
+    若按量级最大取，两条证据会抽到**同一个数**，比值恒 1.0 → 矛盾检测静默失效。
+    实测 F1（180亿/62亿）/ F3（78%/45%）/ D1（12%/8.5%）三例全因此漏报。
+    """
+    # 第二份资料引述了第一份的 180 亿，但**它自己的口径是 62 亿**
+    second = "示例咨询仅统计**平台软件**口径，约 62 亿元；与含交付口径的 1800 亿元相差近三倍。"
+    got = _primary_number(second)
+    assert got is not None
+    assert got[0] == 62e8, f"应抽本方口径 62 亿，实际 {got[0]}"
+
+
+def test_primary_number_extracts_competing_calibers_from_pair() -> None:
+    """两条证据必须各自抽出**本方**口径，比值才达阈值（这里 2.90×）。"""
+    a = _primary_number("示例研究院测算：含交付口径约 1800 亿元，2023–2025 复合增速约 42%。")
+    b = _primary_number("示例咨询仅统计平台软件口径，约 620 亿元；与含交付口径的 1800 亿元相差近三倍。")
+    assert a and b
+    lo, hi = sorted((a[0], b[0]))  # sorted 升序：先小后大
+    assert hi / lo >= 1.5, f"应达冲突阈值，实际 {hi / lo:.2f}"
+
+
+def test_primary_number_same_unit_family_required() -> None:
+    """`万辆` 与 `亿` 不同族，不可比——闸门①的单元级验证。"""
+    wan = _primary_number("出口量约 210 万辆，同比增速约 32%。")
+    yi = _primary_number("市场规模约 1800 亿元。")
+    assert wan and yi
+    assert wan[1] == "万" and yi[1] == "亿"
+    assert wan[1] != yi[1], "万辆 与 亿 不属同一单位族，不应参与比对"
+
+
+def test_primary_number_none_when_no_number() -> None:
+    assert _primary_number("本文没有给出任何可量化口径。") is None

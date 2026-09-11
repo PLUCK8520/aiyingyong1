@@ -107,33 +107,59 @@ def _new_gaps_only(state: dict[str, Any], gaps: list[str]) -> list[str]:
 
 
 def _conflict_key(c: Conflict) -> tuple[str, str, str]:
-    a, b = sorted([c.claim_a, c.claim_b])
-    return (c.topic, a, b)
+    """去重键 = **双方原话**（规范化后），**不含** `topic`，也**不含**引用编号。
+
+    为什么两个字段都要从键里拿掉（T7.2 实测，逐条踩出来的）：
+
+    1. **去掉 `topic`（子问题/扇出分支名）**——分支不是争议的身份。词法检索会把同一条证据
+       塞进多个分支，于是"同一处分歧"被每个分支各报一次。
+    2. **去掉引用编号**——这更隐蔽：每个扇出分支有**自己的编号空间**，所以**同一份文档**
+       被 3 个分支检索到时会拿到 3 个不同编号（`WEB1-1-2` / `WEB1-2-2` / `WEB1-3-3`）。
+       按编号去重会把它们当成 3 条不同证据，`conflicts` 计数从 1 虚增到 3（C3/C4/L2/L3 实测）。
+
+    一处分歧的真实身份是"**什么口径对什么口径不一致**"，即双方原话的组合——
+    与它在哪个分支被发现、被编了哪个号都无关。所以键只保留规范化后的双方原话。
+    """
+    a, b = sorted([_norm_claim(c.claim_a), _norm_claim(c.claim_b)])
+    return ("|", a, b)
+
+
+def _norm_claim(text: str) -> str:
+    """把原话规范化后用于比较：去空白、去 markdown 标记干扰。
+
+    同一份文档在不同分支被截断到不同长度时（`_snippet(limit=60)` 的截断点一致，
+    但前缀可能带不同的 markdown 残留），规范化能提高命中去重的概率。
+    """
+    return re.sub(r"[\s*`_]+", "", text or "")
 
 
 def _conflict_sides(c: Conflict) -> tuple[tuple[str, str], tuple[str, str]]:
-    return ((c.source_a, c.claim_a), (c.source_b, c.claim_b))
+    """返回两侧的 (规范化原话, 引用编号)。**锚点比较用规范化原话**，编号只作展示。"""
+    return ((_norm_claim(c.claim_a), c.source_a), (_norm_claim(c.claim_b), c.source_b))
 
 
 def _dedupe_conflicts(found: list[Conflict], existing: list[Conflict]) -> list[Conflict]:
     """跨轮 + 同轮去重。两条判据：
 
-    1. **完全相同**（同主题 + 双方原话）→ 直接丢。
-    2. **同一处分歧被另一来源重复报**：同主题下，若某方的「来源编号 + 原话」已经出现过，
-       说明这是同一个争议换了对面来源又来报一次，合并掉（保留先出现的）。
+    1. **完全相同**（双方原话都相同）→ 直接丢。见 `_conflict_key`：键不含分支名、
+       也不含引用编号，因为同一份文档在不同扇出分支会拿到不同编号。
+    2. **同一处分歧被另一个来源重复报**：若某侧的原话已经出现过，说明同一个争议换了
+       对面来源又来报一次，合并掉（保留先出现的）。
 
-    判据 2 刻意收紧到"来源 + 原话都相同"——只有**同一来源说同一句话**才算重复；
-    同一来源在同一主题下谈**另一个**指标（原话不同）不会被误并。
+    判据 2 刻意收紧到"原话相同"——只有**同一句话**才算重复；谈**另一个**指标
+    （原话不同）不会被误并。**锚点用规范化原话而非引用编号**，理由同上。
 
     实测教训（P3 收尾）：180 亿 vs 62 亿的口径差，被 `WEB1-1-1` 和 `WEB1-1-2` 分别
     与同一句 `LOC1-1-1`（62 亿）配对，报告里"争议与分歧"于是把同一出处报了两遍。
+    实测教训（T7.2）：`topic` 是分支名、编号按分支独立，同一处分歧被 3 个分支各报一次
+    → 见 `_conflict_key`。
     """
     kept: list[Conflict] = list(existing)
     seen = {_conflict_key(c) for c in kept}
-    anchors: set[tuple[str, str, str]] = set()
+    anchors: set[str] = set()
     for c in kept:
-        for src, claim in _conflict_sides(c):
-            anchors.add((c.topic, src, claim))
+        for claim, _src in _conflict_sides(c):
+            anchors.add(claim)
 
     out: list[Conflict] = []
     for c in found:
@@ -141,11 +167,11 @@ def _dedupe_conflicts(found: list[Conflict], existing: list[Conflict]) -> list[C
         if key in seen:
             continue
         sides = _conflict_sides(c)
-        if any((c.topic, src, claim) in anchors for src, claim in sides):
+        if any(claim in anchors for claim, _src in sides):
             continue
         seen.add(key)
-        for src, claim in sides:
-            anchors.add((c.topic, src, claim))
+        for claim, _src in sides:
+            anchors.add(claim)
         out.append(c)
     return out
 

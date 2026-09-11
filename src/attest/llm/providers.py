@@ -268,6 +268,21 @@ class MockProvider:
 
         刻意**保守**：只认"可比的同一单位族数值"，且差异不足阈值就不报。
         宁缺毋滥——把正常口径差异渲染成冲突，比漏报更伤报告可信度。
+
+        **两道闸门**（缺一不可）：
+          ① 同单位族：`万辆` ≠ `亿`，不可比就不判；
+          ② 数值倍数 ≥ `conflict_min_ratio`（配置项，默认 1.5）。
+
+        ⚠️ **已知局限（T7.2 评测排查结论，不要试图用启发式修补）**：
+        planner 在离线档产出的是**与主题无关的通用子问题**（"市场规模与增长情况" /
+        "主要参与方与竞争格局" / "收费模式与落地成本"），而 `sub_question` 是按**扇出分支**
+        贴的标签，不是按正文内容判的。结果是：词法检索把同主题不同侧面的证据塞进同一分支，
+        `select_pairs` 照样两两比对。两个后果——
+          · 假阳性：某题的冲突对恰好落在"市场规模"组，即使该题问的是厂商差异也会报冲突；
+          · 漏报：正文讲"降幅"的证据被贴成"市场规模"标签，数值差异再大也不在该题的比对范围。
+        试过"正文必须命中子问题侧词"的第三道闸：**假阳性没清干净，真阳性反而被一起拦掉**
+        （侧词是通用词，与真实冲突内容对不上）。所以撤掉了——这里是**离线 mock 的保真度上限**，
+        不是可以通过调参解决的缺陷。真实路径（dashscope）由 LLM 判定，不依赖启发式。
         """
         records = {r["citation_id"]: r for r in parse_evidence_block(user)}
         pairs = parse_pairs_block(user)
@@ -278,12 +293,14 @@ class MockProvider:
                 continue
             na = _primary_number(a.get("content", ""))
             nb = _primary_number(b.get("content", ""))
+            # 闸门①：单位族不同不可比
             if not na or not nb or na[1] != nb[1]:
                 continue
             lo, hi = sorted((na[0], nb[0]))
             if lo <= 0:
                 continue
             ratio = hi / lo
+            # 闸门②：差异倍数不足阈值
             if ratio < self._min_ratio:
                 continue
             severity = "high" if ratio >= 3 else ("medium" if ratio >= 2 else "low")
@@ -337,15 +354,20 @@ _UNIT_BASE: dict[str, tuple[str, float]] = {
 def _primary_number(text: str) -> tuple[float, str, str] | None:
     """取正文主数值 → (归一化值, 单位族, 含该数值的原句)。
 
-    多个数值时取量级最大者当"主口径"——这是启发式的取舍，不是金融口径判断。
+    **取正文中出现的第一个数值**（而非量级最大者）——这是 F1/F3/D1 实测校准后的结论：
+
+    反驳"取最大"的教训：口径对比类资料里，第二份资料几乎总会**引述第一份的数字**做对照
+    （"……仅 620 亿元，远低于含交付口径的 1800 亿元"）。若按量级最大取，两条证据会抽到
+    **同一个数**，比值恒为 1.0，矛盾检测静默失效——实测 F1/F3/D1 三例全因此漏报。
+    而"主张"通常在句首、引述在后，取首个数才能各自抽到本方口径。
+
+    这是启发式取舍，不是金融口径判断；离线判别器而已，不替代 LLM 判定。
     """
-    best: tuple[float, str, str] | None = None
-    for m in _NUM_RE.finditer(text or ""):
-        fam, scale = _UNIT_BASE[m.group(2)]
-        norm = float(m.group(1)) * scale
-        if best is None or norm > best[0]:
-            best = (norm, fam, _sentence_with(text, m.group(0)))
-    return best
+    m = _NUM_RE.search(text or "")
+    if not m:
+        return None
+    fam, scale = _UNIT_BASE[m.group(2)]
+    return (float(m.group(1)) * scale, fam, _sentence_with(text, m.group(0)))
 
 
 _HEADING_MARK_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
