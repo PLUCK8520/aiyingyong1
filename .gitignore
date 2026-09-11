@@ -27,6 +27,9 @@ data/chroma_smoke/
 *.db
 *.sqlite
 *.sqlite3
+# SQLite WAL / 共享内存副产物（P6 起检查点常驻写，会稳定产生这两个文件）
+*.sqlite-shm
+*.sqlite-wal
 chroma/
 chroma_db/
 

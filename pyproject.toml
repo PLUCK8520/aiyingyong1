@@ -17,6 +17,7 @@ dependencies = [
     "aiosqlite==0.22.1",
     "pypdf==6.18.0",
     "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.4",
     "pydantic-settings==2.15.0",
 ]
 

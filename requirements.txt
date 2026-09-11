@@ -19,4 +19,5 @@ pypdf==6.18.0
 
 # --- 接入 ---
 fastapi==0.141.1
+uvicorn[standard]==0.52.4   # P6：ASGI 服务器（已随 P-1 环境安装，P6 补声明）
 pydantic-settings==2.15.0
