@@ -166,6 +166,22 @@ export interface TimelineRow {
  */
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
+/**
+ * 带 HTTP 状态码的请求错误。
+ *
+ * 为什么需要状态码：`409 尚未产出结果` 是**运行中的正常状态**，不是故障——
+ * 调用方要能区分"还在跑，稍后再取"与"真出错了"，光看文案不可靠（后端改一个字就失效）。
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -180,7 +196,7 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* 非 JSON 错误体：保留状态码 */
     }
-    throw new Error(detail);
+    throw new ApiError(detail, res.status);
   }
   return (await res.json()) as T;
 }

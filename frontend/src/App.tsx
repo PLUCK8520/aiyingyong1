@@ -147,6 +147,13 @@ export default function App() {
         setCost(0);
         setTokens(0);
       }
+      // 🔴 必须在这里就把状态置为 running（2026-09-12 实测坑）：
+      // 上一轮跑完时 status 是 "done"，而 setReport(null) 会立刻触发"取报告"effect——
+      // 那个 effect 只看 status==="done" 就去 GET /api/report，此刻新会话其实还在跑，
+      // 后端回 409「尚未产出结果（当前 running）」，界面上就挂着一条刺眼的红字报错，
+      // 而且跑完取到报告后**没人清它**（成功路径没 setError(null)），一直留在屏幕上。
+      // 所以：请求一发出就认领 running，别等 SSE 的 run_start 事件回来。
+      setStatus("running");
       if (!opts.resume) lastEventIdRef.current = -1;
 
       setBusy(true);
@@ -180,8 +187,17 @@ export default function App() {
         setCost(r.cost_incurred);
         setTokens(r.tokens_incurred);
         setTab("report");
+        // 成功取到报告 = 这一轮没问题：清掉可能残留的旧报错（含上面那条 409 误报）
+        setError(null);
       })
-      .catch((e) => setError(`取报告失败：${(e as Error).message}`));
+      .catch((e) => {
+        // 409「尚未产出结果」/ 404「会话不存在」都是**暂态**，不是故障：
+        // 前者说明还在跑（等 report_ready 会再来一次），后者说明会话已被清理。
+        // 都不该弹红字——否则用户会以为跑挂了，实际报告马上就到。
+        const st = (e as { status?: number }).status;
+        if (st === 409 || st === 404 || st === 401) return;
+        setError(`取报告失败：${(e as Error).message}`);
+      });
   }, [status, activeId, report]);
 
   // ---------------------------------------------------------- 动作
