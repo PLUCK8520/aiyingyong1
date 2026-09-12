@@ -45,6 +45,8 @@ def run_case(case: dict, *, out_root: Path, quiet: bool) -> dict:
         log_level="WARNING" if quiet else "INFO",
         trace_dir=out_root / "trace" / cid,
         report_dir=out_root / "reports" / cid,
+        # 同 eval/run.py：跨题污染会让 M1~M6 冒烟随顺序漂移，默认关
+        research_memory_enabled=False,
     )
     settings.ensure_dirs()
     ctx = build_context(settings, run_id=cid)

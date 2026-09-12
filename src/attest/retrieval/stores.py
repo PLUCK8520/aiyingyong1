@@ -84,6 +84,15 @@ class NumpyVectorStore:
     def count(self) -> int:
         return len(self._ids)
 
+    def dump(self) -> tuple[list[str], list[str], list[dict]]:
+        """导出 (ids, documents, metadatas)——VectorStore 协议要求的恢复路径。
+
+        T7.4 之前只有 Chroma 实现了它（`build_local_index` 的"文档目录缺失"恢复路径
+        只发生在 chroma 档），NumpyVectorStore 漏了——T7.4 的冷启动恢复
+        （`ResearchMemoryStore.search`）把这条缺口暴露了出来，此处补齐。
+        """
+        return list(self._ids), list(self._docs), [dict(m) for m in self._metas]
+
 
 @dataclass
 class ChromaVectorStore:

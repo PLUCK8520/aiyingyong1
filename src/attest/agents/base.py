@@ -47,6 +47,9 @@ class NodeContext:
     auditor: "CitationAuditor | None" = None
     #: 用户画像存储（T5.2）。为 None 表示记忆关闭——`memory_loader` 会如实留痕并返回空画像。
     profile: "Any | None" = None
+    #: 研究结论记忆（T7.4）。为 None 表示研究闭环关闭——`scout_local` 不检索历史结论，
+    #: `memory_writer` 如实留痕跳过。
+    memory: "Any | None" = None
 
     def budget_snapshot(self, state: dict[str, Any]) -> BudgetSnapshot:
         return snapshot(

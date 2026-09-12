@@ -252,6 +252,9 @@ def Settings_for(out_root: Path):
             log_level="WARNING",
             trace_dir=out_root / "trace" / baseline / cid,
             report_dir=out_root / "reports" / baseline / cid,
+            # 对照组必须隔离：开着闭环会让 B1/B2/B3 互相检索到彼此的沉淀，
+            # 「baseline vs 主系统」的因果就洗没了
+            research_memory_enabled=False,
         )
         s.ensure_dirs()
         return s

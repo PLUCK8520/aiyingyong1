@@ -11,7 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
-SourceKind = Literal["web", "local"]
+#: `memory` = 历史调研沉淀的研究结论（T7.4）。它与 `local` 走同一路检索、同一套编号，
+#: 但来源语义不同（我们自己的结论 vs 用户的资料），评测要能分开统计，故单列一档。
+#: ⚠️ 编号仍映射到 `LOC`（`citations.make_citation_id` 只认 web/非 web 两档），
+#: 这是刻意的：正文里不应出现"MEM"这种让读者莫名其妙的前缀。
+SourceKind = Literal["web", "local", "memory"]
 
 
 @dataclass(frozen=True)

@@ -52,6 +52,10 @@ def run_case(case: dict, *, out_root: Path) -> dict:
         log_level="WARNING",
         trace_dir=out_root / "trace" / cid,
         report_dir=out_root / "reports" / cid,
+        # T7.4：评测默认关闭研究闭环——15 题共享一个进程时，后跑的题会检索到
+        # 先跑题的沉淀（跨题污染），结果随题目顺序漂移，不再可复现。
+        # 闭环收益应作为独立对照实验测（开/关两组各跑一遍），不能混进校准过的基准。
+        research_memory_enabled=False,
     )
     settings.ensure_dirs()
     ctx = build_context(settings, run_id=cid)

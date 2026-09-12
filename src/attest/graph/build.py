@@ -1,6 +1,6 @@
-"""T1.5 / T3.5 / T3.6 / T5.1 / T5.4 · 图组装：节点 + 条件边 + Send 动态扇出 + 反思循环 + 人工确认。
+"""T1.5 / T3.5 / T3.6 / T5.1 / T5.4 / T7.4 · 图组装：节点 + 条件边 + Send 动态扇出 + 反思循环 + 人工确认。
 
-流程（P5 形态）：
+流程（P7 形态）：
 
     START → memory_loader → intent_router ─┬─ direct  → direct_responder → END
                                            └─ research → planner ⏸（静态断点 interrupt_before）
@@ -11,11 +11,13 @@
                                                                   ↓
                                                                reflect ─有缺口且未超轮且未熔断→ 再扇出 2N 路
                                                                   ↓ 否则
-                                                               analyst → auditor（引用审计+降级）→ END
+                                                               analyst → auditor（引用审计+降级）
+                                                                       → memory_writer（T7.4 沉淀 supported 结论）→ END
 
 关键点：
   - `scout_web` / `scout_local` 是 Send 的目标节点，入参是**单个子问题包**（不是全量 state）；
     两者返回的 `evidence` 经 `operator.add` 归并回主 state——这就是 L2-1 的落点。
+  - `scout_local` 自 T7.4 起**双路检索**：用户资料库（docs）+ 历史研究结论（research_memory）。
   - 反思循环用 `reflect_targets` 驱动：`reflect` 是唯一写入者，路由函数是纯读，
     所以"补检哪几路、为什么"在 state/trace 里都可回查。
   - `Send` 一律 `from langgraph.types`（1.x 的 `langgraph.graph` 不再导出，P-1 实测）。
@@ -26,6 +28,8 @@
     被**静默放行**（详见 `agents/human_confirm.py` 模块文档串），已废弃。
     恢复方式：`invoke(None, cfg)` 停在断点 / `invoke(Command(resume=...), cfg)` 放行。
   - **T5.1 检查点**：`build_graph(ctx, checkpointer=...)`；不传则退化为无状态单跑（P1~P4 行为）。
+  - **T7.4 研究闭环**：`memory_writer` 是终点前的最后一跳，**必须在 auditor 之后**——
+    审计是唯一给出 `verdict` 的环节，沉淀只能等它判完（防自我投毒）。
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from ..agents import (
     human_confirm,
     intent_router,
     memory_loader,
+    memory_writer,
     planner,
     reflect,
     scout_local,
@@ -55,11 +60,13 @@ from ..config import DATA_DIR, Settings
 from ..llm.gateway import LLMGateway
 from ..logging import get_logger
 from ..memory.profile import ProfileStore
+from ..memory.research_memory import ResearchMemoryStore
 from ..quality.citation_auditor import make_citation_auditor
 from ..retrieval.local_search import make_local_client as build_local_client
 from ..retrieval.mock_search import FixtureSearchClient
 from ..retrieval.ports import SearchClient
 from ..retrieval.rerank import DashScopeReranker, LexicalReranker
+from ..retrieval.stores import ChromaVectorStore, NumpyVectorStore
 from ..retrieval.tavily_client import TavilyClient
 from ..trace.events import TraceWriter
 from .state import INITIAL_STATE, GraphState
@@ -137,6 +144,40 @@ def make_local_search_client(
     )
 
 
+def make_research_memory(
+    settings: Settings, gateway: LLMGateway
+) -> ResearchMemoryStore | None:
+    """装配研究结论记忆（T7.4）。返回 None 表示未启用——`scout_local` 不检索历史结论、
+    `memory_writer` 如实留痕跳过，主流程零改动。
+
+    ⚠️ **每个 run 一个新 store**：与本地知识库（`make_local_search_client`）的**进程级缓存**
+    语义不同——
+      - docs 索引是只读的，缓存安全；
+      - research_memory 是**读写的**，`_ids`/`_metas` 是内存副本。若跨 run 共用同一实例，
+        评测中"跑 A 断言的写会污染跑 B 断言的读"，对照组也就不可比了。故此处**不缓存**。
+    """
+    if not settings.research_memory_enabled:
+        log.info("[graph] 研究闭环关闭（ATTEST_RESEARCH_MEMORY_ENABLED=0）")
+        return None
+
+    embedder = "mock-hashing" if settings.llm_mode == "mock" else settings.model_embed
+    dim = _resolve_dim(settings, gateway)
+    # 独立 collection：docs 是用户资料、research_memory 是我们自己的结论，必须分得清"谁说的"。
+    store = ChromaVectorStore(
+        path=settings.research_memory_dir,
+        collection="research_memory",
+        embedder=embedder,
+        dim=dim,
+    )
+    if store.count():
+        log.info(f"[graph] 研究闭环已启用：载入历史沉淀 {store.count()} 条")
+    return ResearchMemoryStore(
+        store=store,
+        embed_fn=lambda texts: gateway.embed(list(texts), task="embed_memory")[0],
+        enabled=True,
+    )
+
+
 def build_context(
     settings: Settings,
     *,
@@ -144,6 +185,7 @@ def build_context(
     local: SearchClient | None = None,
     trace: TraceWriter | None = None,
     run_id: str = "local",
+    memory: Any = "__auto__",
 ) -> NodeContext:
     trace = trace or TraceWriter(path=settings.trace_dir / "trace.jsonl", run_id=run_id)
     gateway = LLMGateway(settings=settings, trace=trace)
@@ -158,6 +200,8 @@ def build_context(
         profile=ProfileStore(settings.profile_db, enabled=settings.profile_enabled)
         if settings.profile_enabled
         else None,
+        # T7.4：研究结论记忆。显式传 None/实例可覆盖（测试要隔离存储）；默认自动装配。
+        memory=make_research_memory(settings, gateway) if memory == "__auto__" else memory,
         budget=BudgetConfig(
             total_cny=settings.budget_total_cny,
             total_tokens=settings.budget_total_tokens,
@@ -249,6 +293,9 @@ def build_graph(
     g.add_node("reflect", bind(reflect.run, name="reflect", ctx=ctx))
     g.add_node("analyst", bind(analyst.run, name="analyst", ctx=ctx))
     g.add_node("auditor", bind(auditor.run, name="auditor", ctx=ctx))
+    # T7.4：沉淀节点放在审计**之后**——审计是唯一能给出 verdict 的环节，
+    # 沉淀必须等它判完才知道哪些结论可信（防自我投毒的时序前提）。
+    g.add_node("memory_writer", bind(memory_writer.run, name="memory_writer", ctx=ctx))
 
     g.add_edge(START, "memory_loader")
     g.add_edge("memory_loader", "intent_router")
@@ -264,7 +311,8 @@ def build_graph(
         "reflect", route_after_reflect, [*SCOUT_NODES, "analyst"]
     )
     g.add_edge("analyst", "auditor")
-    g.add_edge("auditor", END)
+    g.add_edge("auditor", "memory_writer")
+    g.add_edge("memory_writer", END)
     g.add_edge("direct_responder", END)
 
     return g.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
@@ -288,4 +336,5 @@ def graph_node_sequence() -> list[str]:
         "reflect",
         "analyst",
         "auditor",
+        "memory_writer",
     ]

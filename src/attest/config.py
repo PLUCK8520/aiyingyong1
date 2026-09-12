@@ -120,6 +120,18 @@ class Settings(BaseSettings):
     #: 用户画像注入开关（T5.2）
     profile_enabled: bool = Field(True, alias="ATTEST_PROFILE_ENABLED")
 
+    # ---------------- T7.4：研究闭环（research_memory）----------------
+    #: 研究沉淀开关。关掉则 `memory_writer` 如实留痕跳过、`scout_local` 不检索历史结论，
+    #: 等价于 P6 及以前的行为——便于对照"闭环有没有实际收益"。
+    research_memory_enabled: bool = Field(True, alias="ATTEST_RESEARCH_MEMORY_ENABLED")
+    #: 沉淀向量集合的持久化目录。**必须与 `local_chroma_dir` 分开**：
+    #: docs 是用户资料、research_memory 是我们自己产出的结论，混在一起就分不清"谁说的"。
+    research_memory_dir: Path = Field(
+        DATA_DIR / "index" / "research_memory", alias="ATTEST_RESEARCH_MEMORY_DIR"
+    )
+    #: 每次调研从历史结论里检索的条数上限（只做提示，不取代正文引用）
+    research_memory_top_k: int = Field(3, alias="ATTEST_RESEARCH_MEMORY_TOP_K")
+
     # ---------------- 校验 ----------------
     @model_validator(mode="after")
     def _validate(self) -> "Settings":
@@ -151,6 +163,8 @@ class Settings(BaseSettings):
         # 检查点 / 画像的父目录（SQLite 文件本身由 sqlite 驱动创建）
         for p in (self.checkpoint_db.parent, self.profile_db.parent):
             p.mkdir(parents=True, exist_ok=True)
+        if self.research_memory_enabled:
+            self.research_memory_dir.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings() -> Settings:

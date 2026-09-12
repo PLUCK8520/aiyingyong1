@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -19,3 +21,19 @@ def _offline_by_default(monkeypatch: pytest.MonkeyPatch, request: pytest.Fixture
         return
     for key in ("DASHSCOPE_API_KEY", "TAVILY_API_KEY"):
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _research_memory_isolated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """T7.4：测试默认**关闭**研究闭环，并把存储目录指到 tmp——
+
+    否则任何走 `build_context` 的用例都会把 supported 结论写进仓库的
+    `data/index/research_memory`（已实测发生过一次污染，2026-09-12），
+    而且用例之间互相检索到对方的沉淀，断言变得不可复现。
+    需要测闭环本身的用例（test_p7_research_memory.py）显式传
+    `research_memory_enabled=...` / `research_memory_dir=...` 覆盖，不受本 fixture 影响。
+    """
+    monkeypatch.setenv("ATTEST_RESEARCH_MEMORY_ENABLED", "0")
+    monkeypatch.setenv("ATTEST_RESEARCH_MEMORY_DIR", str(tmp_path / "research_memory"))
