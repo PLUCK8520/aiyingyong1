@@ -93,9 +93,11 @@ FREE_HOSTED_MODELS: frozenset[str] = frozenset(
     }
 )
 
-#: 免费向量模型（①官方标"免费"：bge 系列）。计 token、不计费。
+#: 免费向量模型（①官方标"免费"：bge 系列；以及本地 Ollama 拉的 bge-m3）。
+#: **必须收在这里**：`compute_embed_cost` 对未知模型是直接抛错的（不许静默算成 0），
+#: 所以本地模型不登记就会被自己的守卫拦下——这是守卫在正常工作，不是 bug。
 FREE_EMBED_MODELS: frozenset[str] = frozenset(
-    {"BAAI/bge-m3", "BAAI/bge-large-zh-v1.5", "BAAI/bge-large-en-v1.5"}
+    {"BAAI/bge-m3", "BAAI/bge-large-zh-v1.5", "BAAI/bge-large-en-v1.5", "bge-m3"}
 )
 
 # ---------------------------------------------------------------- 向量模型（③第三方，待核）

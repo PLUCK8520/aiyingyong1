@@ -54,3 +54,5 @@ Thumbs.db
 
 # 提交信息临时文件（曾误提交过一次：data/commit-msg.txt）
 data/commit-msg.txt
+# 环境变量备份（含本机 PATH，别进仓库）
+data/path-backup-*.txt
