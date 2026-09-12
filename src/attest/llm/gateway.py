@@ -110,6 +110,10 @@ def build_provider(settings: Settings) -> Provider:
 class LLMGateway:
     settings: Settings
     provider: Provider = field(default=None)  # type: ignore[assignment]
+    #: 是否已就 embedding 兜底告过警（只告一次，别刷屏）
+    _embed_fb_used: bool = field(default=False, init=False, repr=False)
+    #: 兜底用散列向量器（懒加载，复用 mock 的确定性实现）
+    _fb_embedder: object = field(default=None, init=False, repr=False)
     trace: TraceWriter | None = None
 
     def __post_init__(self) -> None:
@@ -149,6 +153,7 @@ class LLMGateway:
                 temperature=temperature,
                 json_schema=response_model,
                 task=task,
+                timeout=float(getattr(self.settings, "llm_timeout_s", 120.0)),
             )
             latency_ms = (time.perf_counter() - started) * 1000
             c = compute_cost(
@@ -217,17 +222,40 @@ class LLMGateway:
 
     # ---------------- 向量 ----------------
     def embed(self, texts: Sequence[str], *, task: str = "embed") -> tuple[list[list[float]], float, int]:
-        """返回 (向量, 费用, token 数)。"""
+        """返回 (向量, 费用, token 数)。
+
+        **兜底**（2026-09-13 实测新增）：部分厂商的免费档不含 embedding（智谱即如此），
+        而本地检索与研究闭环都依赖 embedding。`ATTEST_EMBED_FALLBACK=hashing` 时
+        退回离线散列向量，保住链路；provider 字段会如实标成 `mock-hashing(兜底)`，
+        并**只告警一次**（避免刷屏）——不允许悄悄冒充真向量。
+        """
         model = self.settings.model_embed
-        vectors = self.provider.embed(texts, model=model)
+        provider_name = self.provider.name
+        used_fallback = False
+        try:
+            vectors = self.provider.embed(texts, model=model)
+        except Exception as exc:  # noqa: BLE001
+            fb = getattr(self.settings, "embed_fallback", "none")
+            if fb != "hashing":
+                raise
+            if not self._embed_fb_used:
+                log.warning(
+                    f"[gateway] embedding 不可用（{type(exc).__name__}: {str(exc)[:120]}）→ "
+                    f"按 ATTEST_EMBED_FALLBACK=hashing 退回离线散列向量。\n"
+                    f"  影响：本地知识库检索与研究闭环的相似度是**词法级**而非语义级；"
+                    f"引用编号、审计、成文链路不受影响。"
+                )
+                self._embed_fb_used = True
+            vectors = self._fallback_embedder().embed(texts, model="mock-hashing")
+            provider_name, model, used_fallback = "mock-hashing(兜底)", "mock-hashing", True
         tokens = sum(estimate_tokens(t) for t in texts)
-        cost = compute_embed_cost(model, tokens) if self.provider.name != "mock" else 0.0
+        cost = 0.0 if (used_fallback or provider_name == "mock") else compute_embed_cost(model, tokens)
         if self.trace is not None:
             self.trace.emit(
                 "embed_call",
                 task=task,
                 model=model,
-                provider=self.provider.name,
+                provider=provider_name,
                 texts=len(texts),
                 tokens=tokens,
                 cost_cny=round(cost, 8),
@@ -236,6 +264,11 @@ class LLMGateway:
         return vectors, cost, tokens
 
     # ---------------- 内部 ----------------
+    def _fallback_embedder(self) -> Provider:
+        if self._fb_embedder is None:
+            self._fb_embedder = MockProvider(self.settings)
+        return self._fb_embedder  # type: ignore[return-value]
+
     def _emit_call(
         self,
         task: str,

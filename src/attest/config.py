@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,17 @@ BEIJING_HOST = "dashscope.aliyuncs.com"
 # 硅基流动（OpenAI 兼容；国内直连，无需代理）
 SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
 SILICONFLOW_HOST = "api.siliconflow.cn"
+# 智谱（OpenAI 兼容，但版本段是 /v4 而不是 /v1——校验不能假设单一厂商的约定）
+ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+
+#: OpenAI 兼容端点必须以**版本段**结尾。哪些写法见过：
+#:   /v1（Kimi、DeepSeek、硅基流动）· /v4（智谱）· /compatible-mode/v1（百炼）
+#: 只认 /v1 会把智谱误判成非法配置（2026-09-13 实测踩到）。
+_OPENAI_BASE_RE = re.compile(r"/v\d+/?$")
+
+
+def _looks_like_openai_base(url: str) -> bool:
+    return bool(_OPENAI_BASE_RE.search((url or "").strip()))
 
 
 class Settings(BaseSettings):
@@ -58,6 +70,14 @@ class Settings(BaseSettings):
     compat_base_url: str | None = Field(None, alias="ATTEST_COMPAT_BASE_URL")
     #: 仅用于日志与 trace 的可读标签（如 "kimi" / "中转站A"），不参与任何逻辑。
     compat_label: str = Field("openai-compat", alias="ATTEST_COMPAT_LABEL")
+    #: **没有可用 embedding 时的兜底策略**（2026-09-13 实测需要）：
+    #:   none    —— 如实失败（默认，保持"不假装"的原则）；
+    #:   hashing —— 退回离线散列向量（CJK bigram 哈希词袋，256 维，确定性、零成本）。
+    #: 什么时候需要：部分厂商的免费档**不含 embedding**（智谱免费档就是：
+    #: embedding-3/2 都回「无可用资源包」），而本地知识库检索与研究闭环都要 embedding。
+    #: 用 hashing 兜底能保住这两条链路，但**语义检索质量弱于真实向量模型**，
+    #: 故 trace 里会把 provider 标成 `mock-hashing(兜底)`——不许悄悄冒充真向量。
+    embed_fallback: Literal["none", "hashing"] = Field("none", alias="ATTEST_EMBED_FALLBACK")
     tavily_api_key: str | None = Field(None, alias="TAVILY_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen3:4b", alias="OLLAMA_MODEL")
@@ -93,6 +113,9 @@ class Settings(BaseSettings):
     fixture_dir: Path = Field(DATA_DIR / "fixtures", alias="ATTEST_FIXTURE_DIR")
 
     context_truncate_chars: int = Field(4000, alias="ATTEST_CTX_TRUNCATE")
+    #: 单次 LLM 调用的读超时（秒）。实测教训（2026-09-13）：证据判别要一次送 20+ 条证据，
+    #: 免费档模型 60s 内回不来 → 三次超时把整轮拖垮。真实档给足余量。
+    llm_timeout_s: float = Field(120.0, alias="ATTEST_LLM_TIMEOUT")
     #: T4.3 / 熔断 L2：正文证据按相关性截断到 top-k（设计 §6.5「上下文截断（证据按相关性取 top-k）」）
     fuse_ctx_top_k: int = Field(6, alias="ATTEST_FUSE_CTX_TOP_K")
     search_concurrency: int = Field(3, alias="ATTEST_SEARCH_CONCURRENCY")
@@ -184,10 +207,13 @@ class Settings(BaseSettings):
                     "     报错看着像 key 废了，其实是域名不对。不确定 key 属于谁："
                     "scripts/probe_which_vendor.py --key \"sk-...\""
                 )
-            if not self.compat_base_url.rstrip("/").endswith("/v1"):
+            if not _looks_like_openai_base(self.compat_base_url):
                 raise ValueError(
                     f"ATTEST_COMPAT_BASE_URL 看起来不像 OpenAI 兼容端点：{self.compat_base_url}\n"
-                    "  正确形态：https://<host>/v1（缺少 /v1 是最常见的 404 原因）"
+                    "  正确形态：https://<host>/v1 或 https://<host>/api/paas/v4 —— 即"
+                    "**必须以版本段结尾**（缺版本段的 URL 请求会 404）。\n"
+                    "  实测参考：智谱 = https://open.bigmodel.cn/api/paas/v4（不是 /v1！）；\n"
+                    "           硅基流动 = https://api.siliconflow.cn/v1；Kimi = https://api.moonshot.cn/v1"
                 )
         if self.llm_mode == "siliconflow":
             if not self.siliconflow_api_key:

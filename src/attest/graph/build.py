@@ -183,13 +183,36 @@ def make_research_memory(
 
     embedder = "mock-hashing" if settings.llm_mode == "mock" else settings.model_embed
     dim = _resolve_dim(settings, gateway)
-    # 独立 collection：docs 是用户资料、research_memory 是我们自己的结论，必须分得清"谁说的"。
-    store = ChromaVectorStore(
-        path=settings.research_memory_dir,
-        collection="research_memory",
-        embedder=embedder,
-        dim=dim,
-    )
+    # 兜底生效时（厂商没有 embedding），实际向量是散列的 —— 名字必须如实反映，
+    # 否则 collection 元数据会记成 embedding-3 而实际是 256 维散列，换回真向量时无从判断。
+    if getattr(settings, "embed_fallback", "none") == "hashing" and dim == 256:
+        embedder = "mock-hashing"
+
+    def _open_store() -> ChromaVectorStore:
+        # 独立 collection：docs 是用户资料、research_memory 是我们自己的结论，必须分得清"谁说的"。
+        return ChromaVectorStore(
+            path=settings.research_memory_dir,
+            collection="research_memory",
+            embedder=embedder,
+            dim=dim,
+        )
+
+    try:
+        store = _open_store()
+    except ValueError as exc:
+        # 🔴 实测（2026-09-13）：换 embedding 模型后，Chroma 的向量空间守卫会**拒绝启动**——
+        # 这是守卫在正常工作（不许混算两套向量），但对"我们自己的派生数据"来说，
+        # 直接让整个应用起不来是过重的惩罚。这里明确降级为"重建该 collection"：
+        # **如实告警会丢什么**，然后重建，让主流程能跑。
+        log.warning(
+            f"[graph] 研究结论库的向量空间与当前配置不符，**重建该 collection**"
+            f"（旧的研究沉淀会丢失，因为它们是用另一套向量写的）：{str(exc)[:160]}"
+        )
+        import shutil as _shutil
+
+        _shutil.rmtree(settings.research_memory_dir, ignore_errors=True)
+        store = _open_store()
+
     if store.count():
         log.info(f"[graph] 研究闭环已启用：载入历史沉淀 {store.count()} 条")
     return ResearchMemoryStore(

@@ -90,6 +90,11 @@ FREE_HOSTED_MODELS: frozenset[str] = frozenset(
         "BAAI/bge-large-en-v1.5",
         "BAAI/bge-reranker-v2-m3",
         "tencent/Hunyuan-MT-7B",
+        # 智谱免费档（2026-09-13 实测：key 有效 + chat 200 通过；embedding 无免费额度）
+        "glm-4-flash",
+        "glm-4.5-flash",
+        "glm-z1-flash",
+        "glm-5.3-flash",
     }
 )
 

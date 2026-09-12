@@ -496,6 +496,16 @@ def _extract_parts(query: str) -> list[str]:
 # 结果"换厂商"必须改代码——这次的泛化就是补上这个设计缺陷。
 
 
+class PermanentProviderError(RuntimeError):
+    """**不该重试**的调用失败（如"余额不足"被厂商报成 429）。
+
+    为什么要单独一个类型：httpx 的 HTTPStatusError 会被重试分支的
+    `except (httpx.HTTPError, ...)` 捕获，于是"永久错误"照样白等三次退避
+    （实测智谱把「余额不足或无可用资源包」也报成 429，重试 3 次白等 7 秒）。
+    抛这个类型直接穿出重试循环。
+    """
+
+
 class OpenAICompatProvider:
     """通用 OpenAI 兼容 Provider（httpx 直连，不引入 openai SDK）。"""
 
@@ -515,6 +525,12 @@ class OpenAICompatProvider:
         for attempt in range(self._max_retries):
             try:
                 resp = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+                if resp.status_code == 429 and any(
+                    k in resp.text for k in ("余额", "资源包", "balance", "insufficient", "quota")
+                ):
+                    # 429 通常是限流（可重试），但有的厂商把"余额/资源包不足"也报成 429——
+                    # 那是**永久性**错误，重试只是白等退避时间（实测智谱 code 1113）。
+                    raise PermanentProviderError(f"永久性失败（HTTP 429，非限流）：{resp.text[:200]}")
                 if resp.status_code in (429, 500, 502, 503, 504):
                     raise httpx.HTTPStatusError(
                         f"可重试状态码 {resp.status_code}", request=resp.request, response=resp

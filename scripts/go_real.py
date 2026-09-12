@@ -51,33 +51,38 @@ def _call(path: str, key: str, base: str, payload: dict) -> tuple[int, str]:
 
 
 def step1_probe(settings) -> bool:
-    key = settings.siliconflow_api_key or ""
-    base = settings.siliconflow_base_url
+    key = settings.compat_api_key or settings.siliconflow_api_key or ""
+    base = settings.compat_base_url or settings.siliconflow_base_url
     if not key:
         print("✗ SILICONFLOW_API_KEY 为空：先填 .env")
         return False
 
     print(f"① 探针（端点 {base}）")
+    #: chat 探针是**致命**的（没有对话能力整条链路无意义）；
+    #: embedding/rerank 是**可选**的——部分厂商免费档不含 embedding（智谱即如此），
+    #: 缺了会走 ATTEST_EMBED_FALLBACK 兜底，不该拦住整个流程。
     probes = [
-        ("免费 chat", "/chat/completions", {"model": "Qwen/Qwen2.5-7B-Instruct", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 4}),
-        ("重活 chat", "/chat/completions", {"model": settings.model_planner, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 4}),
-        ("embedding", "/embeddings", {"model": settings.model_embed, "input": ["探针"]}),
-        ("rerank", "/rerank", {"model": settings.model_rerank, "query": "市场规模", "documents": ["a", "b"], "top_n": 2}),
+        ("免费/轻活 chat", "/chat/completions", {"model": settings.model_intent, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}, True),
+        ("重活 chat", "/chat/completions", {"model": settings.model_planner, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 8}, True),
+        ("embedding（可选）", "/embeddings", {"model": settings.model_embed, "input": ["探针"]}, False),
+        ("rerank（可选）", "/rerank", {"model": settings.model_rerank, "query": "市场规模", "documents": ["a", "b"], "top_n": 2}, False),
     ]
-    ok = True
-    for label, path, payload in probes:
+    fatal = []
+    for label, path, payload, required in probes:
         status, detail = _call(path, key, base, payload)
-        flag = "✓" if status == 200 else "✗"
-        print(f"   {flag} {label:10s} → {status} {detail[:110]}")
-        if status != 200:
-            ok = False
-    if not ok:
+        flag = "✓" if status == 200 else ("✗" if required else "—")
+        note = "" if status == 200 else ("（致命）" if required else "（可选，缺失走兜底）")
+        print(f"   {flag} {label:16s} → {status} {detail[:100]} {note}")
+        if status != 200 and required:
+            fatal.append(label)
+    if fatal:
         print(
-            "\n✗ 探针未全通，已停在第一步（后面的步骤都会以'网络错误'的面目出现，跑也是白跑）。\n"
-            "  账户余额不足（402 / code 30001）时：到控制台完成**实名认证** →\n"
-            "  活动中心「认证专享礼」领券（或充值）。免费模型同样受余额/状态门禁，不是代码问题。"
+            f"\n✗ 对话能力不可用（{ '、'.join(fatal) }），已停在第一步。\n"
+            "  常见原因：① 账户无余额/无资源包（智谱 = 「余额不足或无可用资源包」）；\n"
+            "            ② key 不属于该平台（报错会伪装成 401 unauthorized）。"
         )
-    return ok
+        return False
+    return True
 
 
 def step2_reset_index() -> None:
@@ -127,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     settings = load_settings()
-    print(f"llm_mode = {settings.llm_mode}（本脚本强制走 siliconflow 探针，与 .env 无关）\n")
+    print(f"llm_mode = {settings.llm_mode} · 端点 {settings.compat_base_url or settings.siliconflow_base_url}\n")
     if not step1_probe(settings):
         return 1
     step2_reset_index()
