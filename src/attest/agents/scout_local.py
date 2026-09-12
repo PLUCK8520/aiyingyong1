@@ -90,21 +90,37 @@ def run(payload: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     # ---------- ③ 合并去重 → 编号 ----------
     # 去重键与 web/local 一致（url 优先，退标题）：`memory://` 与 `local://` 方案不同，
     # 天然不会互相顶掉。
-    kept: list = []
+    def _dedupe(results: list) -> tuple[list, int]:
+        out, skip = [], 0
+        for r in results:
+            key = r.url or r.title
+            if key in seen or key in seen_here:
+                skip += 1
+                continue
+            seen_here.add(key)
+            out.append(r)
+        return out, skip
+
     seen_here: set[str] = set()
-    skipped = 0
-    for r in [*mem_results, *raw]:
-        key = r.url or r.title
-        if key in seen or key in seen_here:
-            skipped += 1
-            continue
-        seen_here.add(key)
-        kept.append(r)
+    docs_kept, skip_docs = _dedupe(raw)
+    mem_kept, skip_mem = _dedupe(mem_results)
+    skipped = skip_docs + skip_mem
+
+    # 槽位分配（共 RESULTS_PER_QUERY 个）：**docs 优先，但给历史结论留 1 个固定位**——
+    # 实测教训（2026-09-12 smoke 翻红）：memory 命中若排在 docs 前面会把 3 个槽位占满，
+    # 用户资料反而一条不进；全给 docs 则闭环形同虚设。2+1 是两头都在场的最小方案。
+    if mem_kept:
+        docs_take = docs_kept[: RESULTS_PER_QUERY - 1]
+        mem_take = mem_kept[: RESULTS_PER_QUERY - len(docs_take)]
+    else:
+        docs_take = docs_kept[:RESULTS_PER_QUERY]
+        mem_take = []
+    pool = docs_take + mem_take
 
     limit = ctx.settings.context_truncate_chars
     trimmed = [
         r if len(r.content) <= limit else replace(r, content=r.content[:limit] + "…（正文已截断）")
-        for r in kept[:RESULTS_PER_QUERY]
+        for r in pool
     ]
     evidence = assign_citation_ids(
         trimmed, round_no=round_no, subq_no=subq_no, sub_question=sub_question

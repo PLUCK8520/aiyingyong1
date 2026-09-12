@@ -81,6 +81,11 @@ class VectorStore(Protocol):
 
     def count(self) -> int: ...
 
+    def delete(self, ids: list[str]) -> None:
+        """按 id 删除——T7.4 的 purge_report（按报告撤沉淀）需要它，
+        否则撤除只能停留在"内存里看不见"，底层向量还在，重启即复活。"""
+        ...
+
     def dump(self) -> tuple[list[str], list[str], list[dict]]:
         """导出 (ids, documents, metadatas)——用于"文档目录缺失但索引仍在"的恢复路径。"""
         ...

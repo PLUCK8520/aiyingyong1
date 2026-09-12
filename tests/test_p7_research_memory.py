@@ -226,6 +226,7 @@ def test_search_recovers_from_store_dump_after_cold_start() -> None:
 
 
 def test_purge_report_removes_in_memory_items() -> None:
+    """purge 是真删：内存索引与底层向量库同步撤除，count（以 store 为准）同步减少。"""
     mem = _store()
     mem.add(
         [
@@ -237,6 +238,18 @@ def test_purge_report_removes_in_memory_items() -> None:
     assert removed == 1
     assert mem.count() == 1
     assert mem.items()[0].report_id == "r2"
+
+
+def test_purge_report_works_after_cold_start() -> None:
+    """冷启动后 purge：内存副本为空也能撤——会先从 store.dump() 恢复再删。"""
+    shared = NumpyVectorStore(embedder="test", dim=DIM)
+    mem1 = ResearchMemoryStore(store=shared, embed_fn=_embed)
+    mem1.add([MemoryItem(report_id="r1", claim="r1 的结论", audit_verdict="supported")])
+
+    mem2 = ResearchMemoryStore(store=shared, embed_fn=_embed)
+    assert mem2.purge_report("r1") == 1
+    assert mem2.count() == 0
+    assert mem2.search("r1 的结论") == []
 
 
 # ---------------------------------------------------------------- 4a. memory_writer 节点
@@ -309,6 +322,31 @@ def test_scout_local_without_memory_behaves_as_before(tmp_path: Path) -> None:
     )
     assert len(out["evidence"]) == 1
     assert "memory_hits" not in out
+
+
+def test_scout_local_slot_allocation_docs_first_memory_reserved(tmp_path: Path) -> None:
+    """槽位分配：docs 优先 + 历史结论固定位（2026-09-12 smoke 翻红的回归钉）。
+
+    3 条 docs + 3 条 memory 时，结果必须是 docs 2 + memory 1——
+    不能 memory 占满（用户资料消失），也不能 docs 占满（闭环形同虚设）。
+    """
+    mem = _store()
+    for i in range(3):
+        mem.add([MemoryItem(report_id=f"r{i}", claim=f"历史结论 {i}", audit_verdict="supported")])
+    docs = [
+        SearchResult(source="local", title=f"资料{i}", url=f"local://docs/{i}#0",
+                     content=f"用户资料 {i}", score=0.9 - i * 0.01)
+        for i in range(3)
+    ]
+    ctx = _ctx(_settings(tmp_path), tmp_path, memory=mem)
+    ctx.local = _LocalStub(docs)
+
+    out = scout_local_node.run({"sub_question": "q", "subq_no": 1, "round": 1}, ctx)
+    urls = [e.url for e in out["evidence"]]
+    assert len(urls) == 3
+    n_docs = sum(1 for u in urls if u.startswith("local://"))
+    n_mem = sum(1 for u in urls if u.startswith("memory://"))
+    assert (n_docs, n_mem) == (2, 1), f"槽位分配错误：docs={n_docs} memory={n_mem}"
 
 
 def test_scout_local_memory_failure_does_not_break_run(tmp_path: Path) -> None:

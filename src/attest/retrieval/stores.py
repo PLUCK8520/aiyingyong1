@@ -84,6 +84,14 @@ class NumpyVectorStore:
     def count(self) -> int:
         return len(self._ids)
 
+    def delete(self, ids: list[str]) -> None:
+        drop = set(ids)
+        keep = [i for i, cid in enumerate(self._ids) if cid not in drop]
+        self._ids = [self._ids[i] for i in keep]
+        self._docs = [self._docs[i] for i in keep]
+        self._metas = [self._metas[i] for i in keep]
+        self._mat = [self._mat[i] for i in keep]
+
     def dump(self) -> tuple[list[str], list[str], list[dict]]:
         """导出 (ids, documents, metadatas)——VectorStore 协议要求的恢复路径。
 
@@ -186,6 +194,10 @@ class ChromaVectorStore:
 
     def count(self) -> int:
         return int(self._col.count())
+
+    def delete(self, ids: list[str]) -> None:
+        if ids:
+            self._col.delete(ids=list(ids))
 
     def dump(self) -> tuple[list[str], list[str], list[dict]]:
         res = self._col.get(include=["documents", "metadatas"])

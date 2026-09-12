@@ -35,6 +35,7 @@ from attest.config import Settings
 from attest.graph.build import build_context, build_graph, initial_state
 from attest.logging import get_logger
 from attest.memory.checkpointer import make_async_checkpointer
+from attest.reporting import export_report
 from attest.trace.events import TraceWriter
 
 log = get_logger(__name__)
@@ -285,6 +286,11 @@ class SessionManager:
                 "tokens_incurred": int(final.get("tokens_incurred") or 0),
                 "references": self._reference_index(final),
             }
+            # T7.7：跑完即落盘 md（交付动作）。失败只记日志，不影响会话状态。
+            md_path = export_report(
+                session.result, self.settings.report_dir, thread_id=session.thread_id
+            )
+            session.result["report_path"] = str(md_path) if md_path else ""
             session.status = "done"
             session.current_node = None
             summary = trace.summary()

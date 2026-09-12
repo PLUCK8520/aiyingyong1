@@ -181,28 +181,36 @@ class ResearchMemoryStore:
     # ------------------------------------------------------------ 维护
 
     def purge_report(self, report_id: str) -> int:
-        """按 report_id 撤掉某份报告的全部沉淀（回溯清理）。
+        """按 report_id 撤掉某份报告的全部沉淀（回溯清理）——**真删**。
 
         这是"带 report_id"的实际收益：某份报告后来被发现有误，能定向撤掉它的沉淀，
-        而不是重建整个集合。
+        而不是重建整个集合。底层向量库同步删除（`VectorStore.delete`），
+        不存在"内存里看不见、重启又复活"的残留。
         """
-        kept_ids, kept_metas = [], []
-        removed = 0
+        # 冷启动（内存副本为空但库里有数据）：先从 store 恢复，否则 purge 会漏
+        if not self._ids and self.store.count():
+            ids, docs, metas = self.store.dump()
+            self._ids = list(ids)
+            self._metas = [{**m, "claim": d} for m, d in zip(metas, docs)]
+        kept_ids, kept_metas, removed_ids = [], [], []
         for i, m in zip(self._ids, self._metas):
             if m.get("report_id") == report_id:
-                removed += 1
+                removed_ids.append(i)
             else:
                 kept_ids.append(i)
                 kept_metas.append(m)
-        if removed:
+        if removed_ids:
+            try:
+                self.store.delete(removed_ids)
+            except Exception as exc:  # noqa: BLE001 - 底层删失败也要撤内存索引，并如实留痕
+                log.warning(f"[memory] 底层向量删除失败（内存索引已撤，重启可能残留）：{type(exc).__name__}: {exc}")
             self._ids, self._metas = kept_ids, kept_metas
-            log.info(f"[memory] 已撤销 report={report_id} 的 {removed} 条沉淀（集合本身需重建以彻底清除）")
-        return removed
+            log.info(f"[memory] 已撤销 report={report_id} 的 {len(removed_ids)} 条沉淀")
+        return len(removed_ids)
 
     def count(self) -> int:
-        """当前沉淀条数。冷启动（内存副本为空但持久库有数据）时回退到底层 store 计数，
-        避免 trace 里出现"明明有 11 条却报 total=0"的误导。"""
-        return len(self._ids) if self._ids else self.store.count()
+        """可检索的沉淀条数——以底层 store 为准（冷启动内存副本可能还没恢复）。"""
+        return self.store.count()
 
     def items(self) -> list[MemoryItem]:
         """导出当前沉淀（供评测与人工核对）。"""
