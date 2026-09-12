@@ -22,6 +22,9 @@ DOCS_DIR = PROJECT_ROOT / "docs"
 # 免费额度只认华北2(北京)地域（①一手官方，2026-09-10 复核）
 BEIJING_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 BEIJING_HOST = "dashscope.aliyuncs.com"
+# 硅基流动（OpenAI 兼容；国内直连，无需代理）
+SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
+SILICONFLOW_HOST = "api.siliconflow.cn"
 
 
 class Settings(BaseSettings):
@@ -33,12 +36,20 @@ class Settings(BaseSettings):
     )
 
     # ---------------- 模式开关（默认离线）----------------
-    llm_mode: Literal["mock", "dashscope", "ollama"] = Field("mock", alias="ATTEST_LLM_MODE")
+    llm_mode: Literal["mock", "dashscope", "siliconflow", "ollama"] = Field(
+        "mock", alias="ATTEST_LLM_MODE"
+    )
     search_mode: Literal["mock", "tavily"] = Field("mock", alias="ATTEST_SEARCH_MODE")
 
     # ---------------- 密钥 / 端点 ----------------
     dashscope_api_key: str | None = Field(None, alias="DASHSCOPE_API_KEY")
     dashscope_base_url: str = Field(BEIJING_BASE_URL, alias="DASHSCOPE_BASE_URL")
+    #: 硅基流动（T7.9）。与百炼同为 OpenAI 兼容协议，差别只有域名/key/模型名。
+    #: 域名校验的理由与百炼相反：这里**不需要**地域限制，但必须防止把别家的 key 打到它家去
+    #: （实测教训：把硅基流动的 key 填进 DASHSCOPE_API_KEY，百炼回 401 invalid_api_key，
+    #:  报错文案是"key 无效"，很容易被误判成"key 坏了"，其实是走错门）。
+    siliconflow_api_key: str | None = Field(None, alias="SILICONFLOW_API_KEY")
+    siliconflow_base_url: str = Field(SILICONFLOW_BASE_URL, alias="SILICONFLOW_BASE_URL")
     tavily_api_key: str | None = Field(None, alias="TAVILY_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen3:4b", alias="OLLAMA_MODEL")
@@ -153,6 +164,20 @@ class Settings(BaseSettings):
                 "检索模式为 tavily 但没有 TAVILY_API_KEY。\n"
                 "  解决：① 在 .env 填入 key；或 ② 用 ATTEST_SEARCH_MODE=mock 走离线 fixture。"
             )
+        if self.llm_mode == "siliconflow":
+            if not self.siliconflow_api_key:
+                raise ValueError(
+                    "LLM 模式为 siliconflow 但没有 SILICONFLOW_API_KEY。\n"
+                    "  解决：① 在 .env 填入 SILICONFLOW_API_KEY（https://cloud.siliconflow.cn 创建）；或\n"
+                    "        ② 改回离线模式 ATTEST_LLM_MODE=mock。\n"
+                    "  ⚠️ 别把别家的 key 填进来：不同平台 key 不通用，报错是 401「key 无效」，"
+                    "看着像 key 坏了，其实是走错门。"
+                )
+            if SILICONFLOW_HOST not in self.siliconflow_base_url:
+                raise ValueError(
+                    f"SILICONFLOW_BASE_URL 域名不对：{self.siliconflow_base_url}\n"
+                    f"  正确值：{SILICONFLOW_BASE_URL}"
+                )
         if not 0 < self.fuse_warn_ratio < self.fuse_hard_ratio <= 1:
             raise ValueError("熔断阈值必须满足 0 < warn < hard <= 1。")
         return self

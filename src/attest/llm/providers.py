@@ -486,18 +486,27 @@ def _extract_parts(query: str) -> list[str]:
     return parts if len(parts) >= 2 else []
 
 
-# ==================================================================== dashscope
+# ==================================================================== OpenAI 兼容
+#
+# dashscope（阿里百炼）与 siliconflow（硅基流动）用的是**同一套** OpenAI 兼容协议：
+# 同样的 `/chat/completions`、`/embeddings`、`Authorization: Bearer`。
+# 差别只有三处：域名、key、模型名。
+# 故这里只留**一个**实现，厂商差异用 `name`（进日志与 meta，便于观测是谁在跑）+ 域名表达。
+# 教训：原先只有 DashScope 一家时，配置校验把域名硬编码成北京地域，
+# 结果"换厂商"必须改代码——这次的泛化就是补上这个设计缺陷。
 
 
-class DashScopeProvider:
-    """生产 Provider：OpenAI 兼容模式直连（httpx，不额外引入 openai SDK）。"""
+class OpenAICompatProvider:
+    """通用 OpenAI 兼容 Provider（httpx 直连，不引入 openai SDK）。"""
 
-    name = "dashscope"
+    name = "openai-compat"
 
-    def __init__(self, api_key: str, base_url: str, *, max_retries: int = 3) -> None:
+    def __init__(self, api_key: str, base_url: str, *, name: str | None = None, max_retries: int = 3) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._max_retries = max_retries
+        if name:
+            self.name = name
 
     def _post(self, path: str, payload: dict, timeout: float) -> dict:
         url = f"{self._base_url}{path}"
@@ -515,9 +524,13 @@ class DashScopeProvider:
             except (httpx.HTTPError, httpx.TimeoutException) as exc:  # noqa: PERF203
                 last = exc
                 backoff = 2**attempt
-                log.warning(f"[dashscope] 第 {attempt + 1} 次失败：{exc}；{backoff}s 后重试")
+                # 401 是 key/域名不对，重试没有意义——说清楚而不是白等三次退避
+                hint = ""
+                if getattr(getattr(exc, "response", None), "status_code", None) == 401:
+                    hint = "（401：key 无效或走错了厂商域名；不同平台的 key 不通用）"
+                log.warning(f"[{self.name}] 第 {attempt + 1} 次失败：{exc}{hint}；{backoff}s 后重试")
                 time.sleep(backoff)
-        raise RuntimeError(f"DashScope 调用失败（已重试 {self._max_retries} 次）：{last}") from last
+        raise RuntimeError(f"{self.name} 调用失败（已重试 {self._max_retries} 次）：{last}") from last
 
     def chat(self, messages, *, model, temperature=0.2, json_schema=None, task="generic", timeout=60.0):
         payload: dict[str, Any] = {
@@ -537,13 +550,28 @@ class DashScopeProvider:
             input_tokens=int(usage.get("prompt_tokens", 0)),
             output_tokens=int(usage.get("completion_tokens", 0)),
             token_estimate=False,
-            meta={"provider": "dashscope", "finish_reason": choice.get("finish_reason")},
+            meta={"provider": self.name, "finish_reason": choice.get("finish_reason")},
         )
 
     def embed(self, texts, *, model, timeout=60.0):
         data = self._post("/embeddings", {"model": model, "input": list(texts)}, timeout)
         items = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
         return [item.get("embedding", []) for item in items]
+
+
+class DashScopeProvider(OpenAICompatProvider):
+    """阿里云百炼（华北2 北京地域，免费额度只认这里）。"""
+
+    def __init__(self, api_key: str, base_url: str, *, max_retries: int = 3) -> None:
+        super().__init__(api_key, base_url, name="dashscope", max_retries=max_retries)
+
+
+class SiliconFlowProvider(OpenAICompatProvider):
+    """硅基流动（OpenAI 兼容；免费档有小模型，含 embedding 与 rerank）。"""
+
+    def __init__(self, api_key: str, base_url: str, *, max_retries: int = 3) -> None:
+        super().__init__(api_key, base_url, name="siliconflow", max_retries=max_retries)
+
 
 
 # ==================================================================== ollama

@@ -31,6 +31,7 @@ from .providers import (
     OllamaProvider,
     Provider,
     ProviderResult,
+    SiliconFlowProvider,
 )
 from .router import ModelRouter
 
@@ -87,6 +88,10 @@ def build_provider(settings: Settings) -> Provider:
     if mode == "ollama":
         log.info(f"[gateway] LLM 走 ollama，base_url={settings.ollama_base_url}")
         return OllamaProvider(settings.ollama_base_url)
+    if mode == "siliconflow":
+        assert settings.siliconflow_api_key  # config 已校验
+        log.info(f"[gateway] LLM 走 siliconflow，base_url={settings.siliconflow_base_url}")
+        return SiliconFlowProvider(settings.siliconflow_api_key, settings.siliconflow_base_url)
     raise ValueError(f"未知 llm_mode：{mode}")
 
 
