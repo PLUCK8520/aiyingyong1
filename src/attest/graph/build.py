@@ -65,7 +65,7 @@ from ..quality.citation_auditor import make_citation_auditor
 from ..retrieval.local_search import make_local_client as build_local_client
 from ..retrieval.mock_search import FixtureSearchClient
 from ..retrieval.ports import SearchClient
-from ..retrieval.rerank import DashScopeReranker, LexicalReranker
+from ..retrieval.rerank import DashScopeReranker, LexicalReranker, SiliconFlowReranker
 from ..retrieval.stores import ChromaVectorStore, NumpyVectorStore
 from ..retrieval.tavily_client import TavilyClient
 from ..trace.events import TraceWriter
@@ -84,6 +84,15 @@ def make_search_client(settings: Settings) -> SearchClient:
 
 
 def make_reranker(settings: Settings) -> Any:
+    if settings.llm_mode == "siliconflow" and settings.siliconflow_api_key:
+        log.info(
+            f"[graph] rerank 走硅基流动 {settings.model_rerank}（官方标免费，实测 0.3s 排序正确）"
+        )
+        return SiliconFlowReranker(
+            settings.siliconflow_api_key,
+            base_url=settings.siliconflow_base_url,
+            model=settings.model_rerank,
+        )
     if settings.llm_mode == "dashscope" and settings.dashscope_api_key:
         log.warning(
             "[graph] rerank 走 DashScope qwen3.7-text-rerank——**本分支尚未实跑**（无 key 验证），"

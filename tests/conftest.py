@@ -10,6 +10,30 @@ from pathlib import Path
 
 import pytest
 
+from attest.config import Settings
+
+from attest.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_from_local_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """让测试**不受开发者本地 `.env` 影响**。
+
+    为什么必须这样（2026-09-12 实测暴露）：`Settings` 配了 `env_file=.env`，
+    而 `.env` 是 gitignore 的本地文件——一旦开发者把它切成真实厂商
+    （`ATTEST_LLM_MODE=siliconflow` + 真 key），所有"缺 key 应报错""默认走 mock"
+    之类的断言会**在本机静默失效**（CI 上却仍是绿的），这种"只在别人机器上红"的差别最难查。
+
+    关键：光删环境变量不够——pydantic-settings 是**独立去读 dotenv 文件**的，
+    `delenv("SILICONFLOW_API_KEY")` 挡不住 `.env` 里的那行。必须把 `env_file` 摘掉。
+    用例若显式传参（`Settings(llm_mode=...)`）仍然优先，不受影响。
+    """
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    monkeypatch.setenv("ATTEST_LLM_MODE", "mock")
+    monkeypatch.setenv("ATTEST_SEARCH_MODE", "mock")
+    for key in ("SILICONFLOW_API_KEY", "DASHSCOPE_API_KEY", "TAVILY_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
 
 @pytest.fixture(autouse=True)
 def _offline_by_default(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:

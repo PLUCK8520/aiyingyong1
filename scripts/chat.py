@@ -2,7 +2,8 @@
 
 用法：
     .venv/Scripts/python.exe scripts/chat.py "调研'企业知识库 Agent 平台'市场，按市场规模/竞品/收费模式三部分输出"
-    .venv/Scripts/python.exe scripts/chat.py --llm dashscope "..."     # 真实模型 + 离线证据
+    .venv/Scripts/python.exe scripts/chat.py --llm siliconflow "..."   # 真实模型（硅基流动）+ 离线证据
+    .venv/Scripts/python.exe scripts/chat.py --llm dashscope "..."     # 真实模型（阿里百炼）+ 离线证据
     .venv/Scripts/python.exe scripts/chat.py --search tavily "..."     # 真实检索（烧 credits）
 
 P5 新增（记忆与协同）：
@@ -138,7 +139,7 @@ def _interactive_confirm(payload: dict[str, Any]) -> dict[str, Any]:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Attest（质证）· 逐句质证的多 Agent 调研 CLI")
     p.add_argument("query", nargs="*", help=f"调研问题，留空用默认示例：{DEFAULT_QUERY}")
-    p.add_argument("--llm", choices=["mock", "dashscope", "ollama"], help="覆盖 ATTEST_LLM_MODE")
+    p.add_argument("--llm", choices=["mock", "dashscope", "siliconflow", "ollama"], help="覆盖 ATTEST_LLM_MODE")
     p.add_argument("--search", choices=["mock", "tavily"], help="覆盖 ATTEST_SEARCH_MODE")
     p.add_argument("--no-save", action="store_true", help="不把报告写入 data/reports/")
     p.add_argument("--quiet", action="store_true", help="不打印节点日志")
@@ -366,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if settings.llm_mode == "mock":
         print("⚠️  本次为【离线 mock 模式】：正文由脚本生成，不是模型输出；证据来自合成 fixture。")
-        print("    想看真实输出：在 .env 填 DASHSCOPE_API_KEY，然后加 --llm dashscope")
+        print("    想看真实输出：在 .env 填 SILICONFLOW_API_KEY，然后加 --llm siliconflow")
 
     if not args.no_save:
         out = settings.report_dir / f"report-{run_id}.md"

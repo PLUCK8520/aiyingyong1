@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     model_audit_fast: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_AUDIT_FAST")
     model_audit_strong: str = Field("qwen3.8-max", alias="ATTEST_MODEL_AUDIT_STRONG")
     model_embed: str = Field("text-embedding-v4", alias="ATTEST_MODEL_EMBED")
+    #: T7.9：精排模型。硅基流动的 bge-reranker-v2-m3 官方标免费；
+    #: 换 embedding/rerank 模型都要重建索引并重标矛盾阈值（见 T7.4 说明）。
+    model_rerank: str = Field("BAAI/bge-reranker-v2-m3", alias="ATTEST_MODEL_RERANK")
     #: T4.4 / 熔断 L1：轻任务（intent / direct / judge / conflict / audit_fast）降级目标。
     #: 默认取单价表里最便宜的对话模型（qwen3.7-flash，0.3/1.2 元每百万）。
     model_fuse_light: str = Field("qwen3.7-flash", alias="ATTEST_MODEL_FUSE_LIGHT")

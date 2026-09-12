@@ -88,3 +88,40 @@ def truncate_for_rerank(docs: Sequence[str], *, backup: bool = False) -> list[st
     """按 rerank 单条上限截断（字符数≈token 数的保守估计：CJK 1 字 1 token）。"""
     limit = RERANK_BACKUP_MAX_DOC_TOKENS if backup else RERANK_MAX_DOC_TOKENS
     return [d if len(d) <= limit else d[:limit] for d in docs]
+
+
+# ---------------------------------------------------------------- 硅基流动 rerank（T7.9）
+
+SILICONFLOW_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
+
+
+@dataclass
+class SiliconFlowReranker:
+    """硅基流动 rerank（OpenAI 风格的 `/v1/rerank`）。
+
+    **为什么值得接**（2026-09-12 实测）：此前真实档只有 DashScopeReranker 且从未实跑，
+    离线一律退到 `LexicalReranker`——那个"不是 rerank 模型，是词典兜底"。
+    硅基流动这边 `BAAI/bge-reranker-v2-m3` 官方标**免费**，实测 0.3s 返回且排序正确
+    （相关文档 0.97 vs 无关文档低分），所以"精排"这一步终于有真模型可用了。
+
+    响应结构（实测）：`{"results": [{"index": 0, "relevance_score": 0.97}, ...]}`
+    与百炼的 `output.results` 不同——这里按索引取，不假设返回顺序。
+    """
+
+    api_key: str
+    base_url: str = "https://api.siliconflow.cn/v1"
+    model: str = SILICONFLOW_RERANK_MODEL
+    name: str = "siliconflow-rerank"
+    timeout: float = 30.0
+
+    def rerank(self, query: str, docs: Sequence[str], *, top_n: int = 10) -> list[tuple[int, float]]:
+        payload = {"model": self.model, "query": query, "documents": list(docs), "top_n": top_n}
+        resp = httpx.post(
+            f"{self.base_url.rstrip('/')}/rerank",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results") or []
+        return [(int(r["index"]), float(r["relevance_score"])) for r in results]
