@@ -29,6 +29,7 @@ from .providers import (
     DashScopeProvider,
     MockProvider,
     OllamaProvider,
+    OpenAICompatProvider,
     Provider,
     ProviderResult,
     SiliconFlowProvider,
@@ -88,6 +89,16 @@ def build_provider(settings: Settings) -> Provider:
     if mode == "ollama":
         log.info(f"[gateway] LLM 走 ollama，base_url={settings.ollama_base_url}")
         return OllamaProvider(settings.ollama_base_url)
+    if mode == "openai_compat":
+        # 通用档：任何 OpenAI 兼容厂商/中转站，只认 base_url + key
+        assert settings.compat_api_key and settings.compat_base_url  # config 已校验
+        log.info(
+            f"[gateway] LLM 走 {settings.compat_label}（通用 OpenAI 兼容档），"
+            f"base_url={settings.compat_base_url}"
+        )
+        return OpenAICompatProvider(
+            settings.compat_api_key, settings.compat_base_url, name=settings.compat_label
+        )
     if mode == "siliconflow":
         assert settings.siliconflow_api_key  # config 已校验
         log.info(f"[gateway] LLM 走 siliconflow，base_url={settings.siliconflow_base_url}")

@@ -140,17 +140,29 @@ def make_local_search_client(
         return None
 
     embedder = "mock-hashing" if settings.llm_mode == "mock" else settings.model_embed
-    return build_local_client(
-        docs_dir=settings.local_docs_dir,
-        embed_fn=lambda texts: gateway.embed(list(texts), task="embed_local")[0],
-        embedder=embedder,
-        dim=_resolve_dim(settings, gateway),
-        use_chroma=use_chroma,
-        chroma_dir=settings.local_chroma_dir if use_chroma else None,
-        reranker=make_reranker(settings),
-        chunk_chars=settings.local_chunk_chars,
-        chunk_overlap=settings.local_chunk_overlap,
-    )
+    try:
+        return build_local_client(
+            docs_dir=settings.local_docs_dir,
+            embed_fn=lambda texts: gateway.embed(list(texts), task="embed_local")[0],
+            embedder=embedder,
+            dim=_resolve_dim(settings, gateway),
+            use_chroma=use_chroma,
+            chroma_dir=settings.local_chroma_dir if use_chroma else None,
+            reranker=make_reranker(settings),
+            chunk_chars=settings.local_chunk_chars,
+            chunk_overlap=settings.local_chunk_overlap,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 降级不停机（D4）：建索引要调 embedding，而**不是每个厂商都提供 embedding 接口**
+        # （例：Kimi/Moonshot 只有对话模型）。这种情况不该让整个应用起不来——
+        # 本地知识库退化为"未启用"，如实留痕，web 检索与成文照常。
+        log.warning(
+            f"[graph] 本地知识库装配失败，本次禁用本地检索（web 检索与成文不受影响）："
+            f"{type(exc).__name__}: {exc}\n"
+            f"  常见原因：当前厂商（{settings.llm_mode}）不提供 embedding 接口，"
+            f"或模型名 {settings.model_embed!r} 在该厂商不存在。"
+        )
+        return None
 
 
 def make_research_memory(

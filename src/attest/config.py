@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     )
 
     # ---------------- 模式开关（默认离线）----------------
-    llm_mode: Literal["mock", "dashscope", "siliconflow", "ollama"] = Field(
+    llm_mode: Literal["mock", "dashscope", "siliconflow", "openai_compat", "ollama"] = Field(
         "mock", alias="ATTEST_LLM_MODE"
     )
     search_mode: Literal["mock", "tavily"] = Field("mock", alias="ATTEST_SEARCH_MODE")
@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     #:  报错文案是"key 无效"，很容易被误判成"key 坏了"，其实是走错门）。
     siliconflow_api_key: str | None = Field(None, alias="SILICONFLOW_API_KEY")
     siliconflow_base_url: str = Field(SILICONFLOW_BASE_URL, alias="SILICONFLOW_BASE_URL")
+    #: **通用 OpenAI 兼容档**（T7.9b）：只给 base_url + key 就能接任何兼容厂商
+    #: （Kimi / DeepSeek / 各类中转聚合站 / 自建网关……）。
+    #: 加这一档的动机：用户连着换了三家 key，每换一家就要改一次代码——那是设计缺陷。
+    #: ⚠️ 中转/聚合站的 key **只在它自己的域名有效**，官方域名一律 401；所以 base_url 必须给对。
+    compat_api_key: str | None = Field(None, alias="ATTEST_COMPAT_API_KEY")
+    compat_base_url: str | None = Field(None, alias="ATTEST_COMPAT_BASE_URL")
+    #: 仅用于日志与 trace 的可读标签（如 "kimi" / "中转站A"），不参与任何逻辑。
+    compat_label: str = Field("openai-compat", alias="ATTEST_COMPAT_LABEL")
     tavily_api_key: str | None = Field(None, alias="TAVILY_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen3:4b", alias="OLLAMA_MODEL")
@@ -167,6 +175,20 @@ class Settings(BaseSettings):
                 "检索模式为 tavily 但没有 TAVILY_API_KEY。\n"
                 "  解决：① 在 .env 填入 key；或 ② 用 ATTEST_SEARCH_MODE=mock 走离线 fixture。"
             )
+        if self.llm_mode == "openai_compat":
+            if not (self.compat_api_key and self.compat_base_url):
+                raise ValueError(
+                    "LLM 模式为 openai_compat 但缺少 ATTEST_COMPAT_API_KEY / ATTEST_COMPAT_BASE_URL。\n"
+                    "  解决：在 .env 里补齐这两项（base_url 填**该 key 所属平台**的地址，含 /v1）。\n"
+                    "  ⚠️ 中转/聚合站的 key 只在它自己的域名有效，官方域名一律 401「Invalid Authentication」——\n"
+                    "     报错看着像 key 废了，其实是域名不对。不确定 key 属于谁："
+                    "scripts/probe_which_vendor.py --key \"sk-...\""
+                )
+            if not self.compat_base_url.rstrip("/").endswith("/v1"):
+                raise ValueError(
+                    f"ATTEST_COMPAT_BASE_URL 看起来不像 OpenAI 兼容端点：{self.compat_base_url}\n"
+                    "  正确形态：https://<host>/v1（缺少 /v1 是最常见的 404 原因）"
+                )
         if self.llm_mode == "siliconflow":
             if not self.siliconflow_api_key:
                 raise ValueError(

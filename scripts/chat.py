@@ -139,7 +139,7 @@ def _interactive_confirm(payload: dict[str, Any]) -> dict[str, Any]:
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Attest（质证）· 逐句质证的多 Agent 调研 CLI")
     p.add_argument("query", nargs="*", help=f"调研问题，留空用默认示例：{DEFAULT_QUERY}")
-    p.add_argument("--llm", choices=["mock", "dashscope", "siliconflow", "ollama"], help="覆盖 ATTEST_LLM_MODE")
+    p.add_argument("--llm", choices=["mock", "dashscope", "siliconflow", "openai_compat", "ollama"], help="覆盖 ATTEST_LLM_MODE")
     p.add_argument("--search", choices=["mock", "tavily"], help="覆盖 ATTEST_SEARCH_MODE")
     p.add_argument("--no-save", action="store_true", help="不把报告写入 data/reports/")
     p.add_argument("--quiet", action="store_true", help="不打印节点日志")

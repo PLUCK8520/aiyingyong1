@@ -176,3 +176,93 @@ def test_make_reranker_falls_back_to_lexical_in_mock() -> None:
     from attest.retrieval.rerank import LexicalReranker
 
     assert isinstance(make_reranker(_settings()), LexicalReranker)
+
+
+# ---------------------------------------------------------------- 通用兼容档（T7.9b）
+
+
+def test_openai_compat_requires_key_and_base_url() -> None:
+    """通用档必须同时给 key 与 base_url，且报错要指明"域名不对会伪装成 key 无效"。"""
+    with pytest.raises(ValueError) as ei:
+        _settings(llm_mode="openai_compat")
+    msg = str(ei.value)
+    assert "ATTEST_COMPAT_API_KEY" in msg and "ATTEST_COMPAT_BASE_URL" in msg
+    assert "官方域名一律 401" in msg, "这条实测教训必须在报错里，否则下次还会踩"
+
+
+def test_openai_compat_base_url_must_end_with_v1() -> None:
+    """漏 /v1 是最常见的 404 成因，启动就拦下来。"""
+    with pytest.raises(ValueError) as ei:
+        _settings(
+            llm_mode="openai_compat",
+            compat_api_key="sk-x",
+            compat_base_url="https://api.moonshot.cn",
+        )
+    assert "/v1" in str(ei.value)
+
+
+def test_openai_compat_build_provider_uses_label() -> None:
+    """标签只进日志/meta，不参与逻辑——但存在感很重要：排查时要知道是谁在跑。"""
+    s = _settings(
+        llm_mode="openai_compat",
+        compat_api_key="sk-x",
+        compat_base_url="https://api.moonshot.cn/v1",
+        compat_label="kimi",
+    )
+    p = build_provider(s)
+    assert isinstance(p, OpenAICompatProvider)
+    assert p.name == "kimi"
+
+
+def test_openai_compat_default_label() -> None:
+    s = _settings(
+        llm_mode="openai_compat",
+        compat_api_key="sk-x",
+        compat_base_url="https://api.example.com/v1",
+    )
+    assert build_provider(s).name == "openai-compat"
+
+
+# ---------------------------------------------------------------- 通用兼容档（T7.9b）
+
+
+def test_openai_compat_requires_key_and_base_url() -> None:
+    """通用档必须同时给 key 与 base_url，且报错要指明"域名不对会伪装成 key 无效"。"""
+    with pytest.raises(ValueError) as ei:
+        _settings(llm_mode="openai_compat")
+    msg = str(ei.value)
+    assert "ATTEST_COMPAT_API_KEY" in msg and "ATTEST_COMPAT_BASE_URL" in msg
+    assert "官方域名一律 401" in msg, "这条实测教训必须在报错里，否则下次还会踩"
+
+
+def test_openai_compat_base_url_must_end_with_v1() -> None:
+    """漏 /v1 是最常见的 404 成因，启动就拦下来。"""
+    with pytest.raises(ValueError) as ei:
+        _settings(
+            llm_mode="openai_compat",
+            compat_api_key="sk-x",
+            compat_base_url="https://api.moonshot.cn",
+        )
+    assert "/v1" in str(ei.value)
+
+
+def test_openai_compat_build_provider_uses_label() -> None:
+    """标签只进日志/meta，不参与逻辑——但存在感很重要：排查时要知道是谁在跑。"""
+    s = _settings(
+        llm_mode="openai_compat",
+        compat_api_key="sk-x",
+        compat_base_url="https://api.moonshot.cn/v1",
+        compat_label="kimi",
+    )
+    p = build_provider(s)
+    assert isinstance(p, OpenAICompatProvider)
+    assert p.name == "kimi"
+
+
+def test_openai_compat_default_label() -> None:
+    s = _settings(
+        llm_mode="openai_compat",
+        compat_api_key="sk-x",
+        compat_base_url="https://api.example.com/v1",
+    )
+    assert build_provider(s).name == "openai-compat"
