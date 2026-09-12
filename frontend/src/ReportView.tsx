@@ -168,14 +168,19 @@ function Inline({
         const m = part.match(/^\[((?:WEB|LOC)\d+-\d+-\d+)\]$/);
         if (!m) return <InlineMd key={i} text={part} />;
         const id = m[1];
-        const known = Boolean(references[id]);
+        // 后端 `_reference_index` 的键是带方括号的完整编号（`[LOC1-1-1]`），
+        // 而这里捕获组剥掉了括号——不补回的话 known 恒为 false，
+        // 悬浮卡永不渲染、右栏高亮永不命中（2026-09-12 浏览器验收实测发现）。
+        const key = `[${id}]`;
+        const ref = references[key];
+        const known = Boolean(ref);
         return (
           <span key={i} className="group relative inline-block">
             <button
               type="button"
-              onMouseEnter={() => onCite(id)}
+              onMouseEnter={() => onCite(key)}
               onMouseLeave={() => onCite(null)}
-              onFocus={() => onCite(id)}
+              onFocus={() => onCite(key)}
               onBlur={() => onCite(null)}
               className={`mx-0.5 cursor-pointer rounded px-1 font-mono text-[10.5px] align-middle transition-colors duration-150 ${
                 known
@@ -186,7 +191,7 @@ function Inline({
             >
               {id}
             </button>
-            {known && <HoverCard id={id} ref_={references[id]} />}
+            {known && <HoverCard id={id} ref_={ref} />}
           </span>
         );
       })}
