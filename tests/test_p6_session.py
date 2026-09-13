@@ -385,3 +385,72 @@ def test_second_run_while_running_does_not_clobber(tmp_path: Path) -> None:
             await mgr.stop()
 
     run(_check())
+
+
+# ============================================================ 11. 冷启动恢复（P6 待核实 #4）
+
+
+def test_rehydrate_session_from_checkpoint_enables_resume(tmp_path: Path) -> None:
+    """冷启动：内存态丢失后，`_rehydrate_session` 必须能从检查点重建**可续跑**的会话。
+
+    背景（2026-09-13 跨进程探针实测，见 `scripts/p6_coldstart_probe.py`）：
+    修复前 `POST /api/confirm` 只认内存态 → 进程重启后返回 404，
+    用户在 UI 上表现为"看得到待确认会话、点不动"。
+    本用例用**真实检查点 + 真实图**验证重建逻辑；
+    完整跨进程链路（两个独立 OS 进程）由那个探针脚本负责。
+    """
+    from app import main as api_main
+    from app.session import SessionManager, _sessions
+
+    settings = make_settings(tmp_path, human_confirm=True)
+
+    async def _check() -> None:
+        mgr = SessionManager(settings)
+        await mgr.start()
+        try:
+            s = await mgr.create_session("t-cold", "调研'企业知识库 Agent 平台'市场")
+            await mgr.run(s)
+            assert s.status == "awaiting_confirm", f"应先挂在断点：{s.status}"
+
+            # 模拟进程重启：内存登记表清空（检查点仍在磁盘）
+            _sessions.clear()
+
+            revived = await api_main._rehydrate_session(mgr, "t-cold")
+            assert revived is not None, "停在 human_confirm 断点的会话必须能重建"
+            assert revived.status == "awaiting_confirm"
+            assert (revived.pending_confirm or {}).get("outlines"), "应带回大纲供前端弹窗"
+
+            # 重建后能续跑，才算"恢复"完整（不然只是只读展示）
+            await mgr.run(revived, decision={"action": "approve"})
+            assert revived.status == "done", f"续跑应到 done：{revived.status} {revived.error}"
+            assert revived.result.get("report"), "冷启动续跑必须产出报告"
+        finally:
+            _sessions.clear()
+            await mgr.stop()
+
+    run(_check())
+
+
+def test_rehydrate_returns_none_for_completed_thread(tmp_path: Path) -> None:
+    """已完成（done）的会话**不重建**——防"重启后随便点一下就重跑一遍调研"。"""
+    from app import main as api_main
+    from app.session import SessionManager, _sessions
+
+    settings = make_settings(tmp_path, human_confirm=False)
+
+    async def _check() -> None:
+        mgr = SessionManager(settings)
+        await mgr.start()
+        try:
+            s = await mgr.create_session("t-done2", "调研'企业知识库 Agent 平台'市场")
+            await mgr.run(s)
+            assert s.status == "done"
+            _sessions.clear()
+            assert await api_main._rehydrate_session(mgr, "t-done2") is None, (
+                "已完成的会话没有可推进的动作，不应重建"
+            )
+        finally:
+            _sessions.clear()
+            await mgr.stop()
+
+    run(_check())

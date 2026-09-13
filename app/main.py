@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from attest.config import load_settings
 from attest.logging import get_logger, setup_logging
 
-from .session import SessionManager, stream_events
+from .session import Session, SessionManager, stream_events
 
 log = get_logger(__name__)
 
@@ -197,6 +197,10 @@ def _register_routes(app: FastAPI) -> None:
         mgr = _mgr(request)
         session = await mgr.get(body.session_id)
         if session is None:
+            # 内存未命中：可能是①全新 thread，也可能是②进程重启后的既有检查点。
+            # 先试检查点恢复——**不能**对已存在的调研就地起一次新跑（会覆盖用户成果）。
+            session = await _rehydrate_session(mgr, body.session_id)
+        if session is None:
             # 允许直接用新 thread 起跑（前端"新建会话 + 提问"一步到位）
             session = await mgr.create_session(body.session_id, body.query)
         if body.query:
@@ -204,7 +208,14 @@ def _register_routes(app: FastAPI) -> None:
 
         # 已在跑就别重复起任务（防前端双击 / 重复提交导致状态互踩）
         running = session.task is not None and not session.task.done()
-        if running:
+        if session.status == "awaiting_confirm" and not body.resume:
+            # 停在人工确认断点上、客户端又没要求续跑：**不自动起跑**——否则会从零重跑一遍调研。
+            # 推进必须经 POST /api/confirm。新进程的事件缓冲是空的，
+            # 给重新订阅的客户端补一条 awaiting_confirm，前端才能弹出确认框。
+            if not session.events:
+                session.push({"event": "awaiting_confirm", **(session.pending_confirm or {})})
+            log.info(f"[api] thread={session.thread_id} 处于待确认，仅订阅不自动起跑")
+        elif running:
             log.warning(f"[api] thread={session.thread_id} 已有任务在跑，本次仅订阅事件流")
         else:
             decision = {"action": "approve"} if body.resume else None
@@ -245,6 +256,10 @@ def _register_routes(app: FastAPI) -> None:
         """
         mgr = _mgr(request)
         session = await mgr.get(body.session_id)
+        if session is None:
+            # 冷启动恢复（2026-09-13 实测补）：进程重启后内存态丢失、检查点还在。
+            # 不试这一步的话，用户"看得到待确认会话、点确认却 404"。
+            session = await _rehydrate_session(mgr, body.session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"会话不存在：{body.session_id}")
         if session.status != "awaiting_confirm":
@@ -418,6 +433,8 @@ def _checkpoint_view_sync(mgr: SessionManager, thread_id: str) -> dict[str, Any]
             "status": "awaiting_confirm" if snap.next else "done",
             "next": list(snap.next or ()),
             "has_report": bool(values.get("report")),
+            #: 冷启动恢复需要它来重建待确认弹窗（前端 ConfirmModal 的数据源）
+            "plan": values.get("plan") or {},
             "cost_incurred": round(float(values.get("cost_incurred") or 0.0), 6),
             "tokens_incurred": int(values.get("tokens_incurred") or 0),
             "source": "checkpoint",  # 标记来源，前端可区分"内存态"vs"冷启动恢复"
@@ -426,6 +443,33 @@ def _checkpoint_view_sync(mgr: SessionManager, thread_id: str) -> dict[str, Any]
 
 async def _checkpoint_view(mgr: SessionManager, thread_id: str) -> dict[str, Any] | None:
     return await asyncio.to_thread(_checkpoint_view_sync, mgr, thread_id)
+
+
+async def _rehydrate_session(mgr: SessionManager, thread_id: str) -> Session | None:
+    """冷启动恢复：内存里没有会话时，按检查点重建一个**可续跑**的 Session。
+
+    背景（P6 待核实清单第 4 条，2026-09-13 跨进程实测坐实）：
+    `GET /api/session/{id}` 能靠检查点读出"待确认"会话，但 `POST /api/confirm` 只认内存态
+    → 返回 404「会话不存在」。用户在 UI 上表现为"**看得到、点不动**"。
+    本函数把检查点里"停在 human_confirm 断点"的会话重建成内存 Session，
+    使续跑路径对冷启动也成立。
+
+    只重建**停在人工确认断点**的会话：已完成（done）的会话没有可推进的动作，
+    不重建（`GET /api/session/{id}` 仍以只读视图展示它）——
+    **避免"重启后随便点一下就重跑一遍调研"**。
+    """
+    view = await _checkpoint_view(mgr, thread_id)
+    if view is None or view.get("status") != "awaiting_confirm":
+        return None
+    from attest.agents.human_confirm import confirm_payload
+
+    session = await mgr.create_session(thread_id, view.get("query") or "")
+    session.status = "awaiting_confirm"
+    session.pending_confirm = confirm_payload(view.get("plan") or {})
+    log.info(
+        f"[api] 冷启动恢复会话 thread={thread_id}（源=检查点，待执行={view.get('next')}）"
+    )
+    return session
 
 
 #: `uvicorn app.main:app` 的入口
