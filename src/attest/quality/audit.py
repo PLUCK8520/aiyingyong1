@@ -77,6 +77,10 @@ def verify_claim(
     # 先剥掉引用编号再判定：编号（如 WEB1-1-1）不是 claim 的内容，
     # 留着会把"含编号的碎片句"误判为 unsupported（见 _CITE_STRIP_RE 注释）。
     text = _CITE_STRIP_RE.sub("", claim)
+    if not (evidence or "").strip():
+        # 证据为空 = 这个编号在证据集里**根本不存在**（模型臆造）。必须判 unsupported 而不是
+        # 走下面的覆盖率分支：理由要让人一眼看出是"幻觉编号"，而不是"覆盖率低"。
+        return "unsupported", "该编号在证据集中不存在（疑似模型臆造编号），无证据可核验"
     uniq = list(dict.fromkeys(_content_tokens(text)))
     if not uniq:
         return "partial", "claim 里没有可判定的实词（疑似纯指代/被截断的占位句）"
@@ -103,15 +107,27 @@ _CLAIM_SPLIT_RE = re.compile(r"(?<=[。；;！!？?])|\n+")
 
 
 def extract_claims(report: str, citation_ids: Iterable[str]) -> list[tuple[str, str]]:
-    """从报告里抽出「带引用的句子」→ [(句子, 引用编号)]。审计只关心有引用的句子。"""
-    known = set(citation_ids)
+    """从报告里抽出「带引用的句子」→ [(句子, 引用编号)]。审计只关心有引用的句子。
+
+    ⚠️ **不过滤"未知编号"**（2026-09-13 真实运行暴露的漏洞，务必保持）：
+    原实现是 `ids = [i for i in findall(...) if i in known]`，于是**引用了不存在编号的
+    句子被静默跳过**——而这恰恰是最该被质证的一类：模型臆造编号。
+    实测案例：第 2 轮只补检了子问题 6–9，模型却在正文里写了 `[WEB2-2-2]`——该编号
+    在证据集里根本不存在。过滤掉等于给幻觉开后门：正文留着编号、参考资料里查无此条、
+    审计也不吭声，而 `CitationIndex` 只报出一个"未解析"，没人知道是哪句话的问题。
+    现在未知编号一并送审，`verify_claim` 会因证据为空判 `unsupported`，
+    再由 `degrade_report` 去掉编号并标注「（未证实）」——这才是"逐句质证"的完整闭环。
+
+    `citation_ids` 参数保留：调用方仍在传"已知编号集合"，但实现上**不再用于过滤**。
+    留着是为了不破坏既有调用方与测试签名；语义已改为仅供调用方自述。
+    """
     out: list[tuple[str, str]] = []
     for raw in _CLAIM_SPLIT_RE.split(report or ""):
         sent = (raw or "").strip().lstrip("-*# ").strip()
         if not sent:
             continue
-        ids = [i for i in re.findall(r"\[(?:WEB|LOC)\d+-\d+-\d+\]", sent) if i in known]
-        for cid in dict.fromkeys(ids):
+        ids = dict.fromkeys(_CITE_RE.findall(sent))
+        for cid in ids:
             out.append((sent, cid))
     return out
 
@@ -163,16 +179,18 @@ def iter_sections(report: str) -> list[tuple[str, str]]:
 def extract_claims_sectioned(
     report: str, citation_ids: Iterable[str]
 ) -> list[tuple[str, str, str]]:
-    """在 `extract_claims` 基础上带上所属章节 → [(句子, 引用编号, 章节标题)]。"""
-    known = set(citation_ids)
+    """在 `extract_claims` 基础上带上所属章节 → [(句子, 引用编号, 章节标题)]。
+
+    同样**不过滤未知编号**（理由见 `extract_claims` 的 docstring）——这是审计器
+    `citation_auditor` 实际调用的入口，过滤掉的话幻觉编号就彻底没人管了。
+    """
     out: list[tuple[str, str, str]] = []
     for title, body in iter_sections(report):
         for raw in _CLAIM_SPLIT_RE.split(body):
             sent = (raw or "").strip().lstrip("-*# ").strip()
             if not sent:
                 continue
-            ids = [i for i in _CITE_RE.findall(sent) if i in known]
-            for cid in dict.fromkeys(ids):
+            for cid in dict.fromkeys(_CITE_RE.findall(sent)):
                 out.append((sent, cid, title))
     return out
 

@@ -3,13 +3,19 @@
  + P5 检查点/画像/静态断点/断点续跑」。
 
 用法：
-    .venv/Scripts/python.exe scripts/smoke.py
+    .venv/Scripts/python.exe scripts/smoke.py              # 离线档（默认，可重复，不烧额度）
+    .venv/Scripts/python.exe scripts/smoke.py --real       # 跟 .env 走真实档（仅供人工观察）
 
 退出码 0 = 冒烟通过。任何一项不过都返回非 0，便于以后挂到 CI 或 pre-commit。
+
+⚠️ **默认强制离线档**：本脚本断言依赖 mock 的可预测行为（如"续跑 scout 数 == 子问题数×2"
+假设证据充足、不触发补检）。若跟着 .env 走真实模型，子问题数与补检轮次都不可预测，
+断言必然失效——2026-09-13 实测过一次（切真实档后 `[P5] T5.5` FAIL）。
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -128,12 +134,33 @@ def _smoke_p5(settings) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="端到端冒烟（默认强制离线档，保证可重复）")
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="按 .env 的档位跑（真实模型/真实检索）。仅供人工观察："
+        "部分断言依赖离线档的可预测行为，真实档下会失效。",
+    )
+    args = parser.parse_args()
+
     settings = load_settings()
+    if not args.real:
+        # ⚠️ 必须显式压平到离线档，不能跟着 .env 走。
+        # 本脚本的断言（如 [P5]「续跑 scout 数 == 子问题数 × 2」）依赖 **mock 的可预测行为**
+        # （证据充足 → 不触发补检、plan 固定）。一旦 .env 被切成真实档，规划出的子问题数
+        # 与补检轮次都不可预测，断言必然失效——2026-09-13 实测：切真实档后
+        # `[P5] T5.5` 直接 FAIL（scout=38，期望 6）。
+        # 这与"本地 .env 让测试静默失效"是同一类坑（见 tests/conftest.py 的同款处理），
+        # 所以在这里也压平；要跑真实档请显式加 --real。
+        settings.llm_mode = "mock"
+        settings.search_mode = "mock"
+
     setup_logging("WARNING")
     settings.ensure_dirs()
 
     print("=" * 72)
-    print(f"冒烟：LLM={settings.llm_mode} | 检索={settings.search_mode}")
+    print(f"冒烟：LLM={settings.llm_mode} | 检索={settings.search_mode}"
+          f"{'' if args.real else '（已强制离线档；加 --real 可跟 .env 走）'}")
     print("=" * 72)
 
     # 1) state reducer 自检（漏了 reducer = 扇出静默丢数据）

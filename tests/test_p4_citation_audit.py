@@ -19,6 +19,7 @@ from attest.quality.audit import (
     extract_claims_sectioned,
     group_claims_by_citation,
     section_failure_ratios,
+    verify_claim,
 )
 from attest.quality.citation_auditor import LLMCitationAuditor, RuleCitationAuditor
 from attest.retrieval.ports import Evidence
@@ -321,3 +322,39 @@ def test_auditor_node_skips_when_disabled() -> None:
     state = {"report": "# 报告\n\n正文", "evidence": [_ev()], "plan": {}}
     out = auditor_node.run(state, _FakeCtx(None))  # type: ignore[arg-type]
     assert out == {}, "审计关闭时应返回空增量，而不是假装审计过"
+
+
+# --------------------------- T7.9c 幻觉编号必须被质证（2026-09-13 真实运行暴露的漏洞）
+
+def test_extract_claims_sectioned_keeps_unknown_citation() -> None:
+    """引用了**不存在编号**的句子曾被静默过滤掉——幻觉因此漏过质检。
+
+    实测：第 2 轮只补检了子问题 6–9，模型却在正文里编出 `[WEB2-2-2]`。
+    正文留着它、参考资料里查无此条、审计也不吭声——只有 `CitationIndex` 报了个
+    "未解析 1 处"，没人知道是哪句话的问题。这类句子恰恰最该被质证。
+    """
+    report = "# 报告\n\n## 竞争格局\n\n三类玩家重叠明显 [WEB2-2-2]。\n"
+    claims = extract_claims_sectioned(report, [CID])  # 已知编号里没有 WEB2-2-2
+    assert [c[1] for c in claims] == ["[WEB2-2-2]"], "未知编号必须送审，不能被过滤"
+
+
+def test_verify_claim_unknown_citation_is_hard_unsupported() -> None:
+    """证据为空（编号不存在）时理由要说清是"幻觉编号"，而非笼统的"覆盖率低"。"""
+    verdict, reason = verify_claim("三类玩家重叠明显 [WEB2-2-2]", "")
+    assert verdict == "unsupported"
+    assert "不存在" in reason, f"理由要指出编号不存在：{reason}"
+
+
+def test_auditor_node_degrades_hallucinated_citation() -> None:
+    """端到端：幻觉编号的句子应被**去掉编号 + 标注「（未证实）」**，正常句子不受影响。"""
+    report = (
+        "# 报告\n\n## 竞争格局\n\n三类玩家重叠明显 [WEB2-2-2]。\n\n"
+        "## 核心摘要\n\n市场规模达 180 亿元 [WEB1-1-1]。\n"
+    )
+    state = {"report": report, "evidence": [_ev()], "plan": {"objective": "测试"}}
+    out = auditor_node.run(state, _FakeCtx(RuleCitationAuditor()))  # type: ignore[arg-type]
+
+    assert out["audit_summary"]["unsupported"] == 1
+    assert "[WEB2-2-2]" not in out["report"], "幻觉编号应从正文移除"
+    assert "（未证实）" in out["report"], "该句应被标注"
+    assert "[WEB1-1-1]" in out["report"], "被支持的编号不受影响"

@@ -19,7 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from attest.agents.evidence_judge import _dedupe_conflicts
+from attest.agents.evidence_judge import (
+    MAX_CLAIM_CHARS,
+    _dedupe_conflicts,
+    _is_near_dup,
+    sanitize_claim,
+    sanitize_conflict,
+)
 from attest.agents.reflect import targets_from_gaps
 from attest.llm.providers import _primary_number
 from attest.quality.audit import extract_claims, verify_claim
@@ -378,3 +384,112 @@ def test_primary_number_same_unit_family_required() -> None:
 
 def test_primary_number_none_when_no_number() -> None:
     assert _primary_number("本文没有给出任何可量化口径。") is None
+
+
+# ------------------------------------- T7.9c 真实运行暴露的两个质量缺陷（claim 清洗 / 近重复）
+
+def _c(
+    a: str,
+    b: str,
+    *,
+    sa: str = "[WEB1-1-1]",
+    sb: str = "[LOC1-1-1]",
+    topic: str = "市场规模",
+) -> Conflict:
+    return Conflict(
+        sub_question="市场规模与增长情况",
+        topic=topic,
+        claim_a=a,
+        source_a=sa,
+        claim_b=b,
+        source_b=sb,
+    )
+
+
+def test_sanitize_claim_strips_citation_and_markdown() -> None:
+    """claim 里不该留引用编号（展示层有 source_*），markdown 标记也要去掉。"""
+    dirty = "**约 1800 亿元** [WEB1-1-1]，含交付口径"
+    assert sanitize_claim(dirty) == "约 1800 亿元，含交付口径"
+
+
+def test_sanitize_claim_truncates_full_evidence_dump() -> None:
+    """**T7.9c 真实运行缺陷**：glm-4-flash 把整段证据原文串进了 claim。
+
+    提示词写了「≤60 字原话」，但小模型不服从——必须在代码里截断，
+    否则报告「争议与分歧」章节会被几百字的 claim 撑爆。
+    """
+    dump = "示例研究院《2025 企业知识库市场追踪》指出，" + "根据多方访谈与问卷回收结果，" * 40
+    out = sanitize_claim(dump)
+    assert len(out) <= MAX_CLAIM_CHARS + 1, f"未截断：{len(out)} 字"
+    assert out.endswith("…"), "截断后应有省略号，让人知道被截了"
+
+
+def test_sanitize_claim_keeps_short_original_intact() -> None:
+    """正常的短 claim 不能被改动（否则会破坏去重键的稳定性）。"""
+    ok = "平台软件口径约 620 亿元"
+    assert sanitize_claim(ok) == ok
+
+
+def test_sanitize_conflict_cleans_both_sides_and_summary() -> None:
+    c = sanitize_conflict(
+        _c("**1800 亿元**\n[WEB1-1-1]", "620 亿元 [LOC1-1-1]")
+    )
+    assert "\n" not in c.claim_a and "[" not in c.claim_a
+    assert c.claim_b == "620 亿元"
+
+
+def test_is_near_dup_catches_connective_variants() -> None:
+    """**T7.9c 实测案例**：同一话题两种措辞（和 / 与），精确匹配抓不到。"""
+    assert _is_near_dup("市场规模和增长趋势", "市场规模与增长趋势")
+
+
+def test_is_near_dup_never_merges_different_numbers() -> None:
+    """反例（这条比上一条更重要）：只差数字的两句话**正是冲突本身**。
+
+    `2024年市场规模为62亿元` vs `...180亿元` 字符相似度 ≈0.91，
+    若只看相似度会把真冲突当重复并掉——等于把矛盾检测关掉。
+    """
+    assert not _is_near_dup("2024年市场规模为62亿元", "2024年市场规模为180亿元")
+
+
+def test_is_near_dup_rejects_length_mismatch() -> None:
+    """短语 vs 整句不判近重复（长度悬殊时短串会被包含，相似度虚高）。"""
+    assert not _is_near_dup("市场规模", "市场规模与增长趋势" * 5)
+
+
+def test_dedupe_merges_near_duplicate_phrasing() -> None:
+    """跨轮/跨分支把同一话题用两种措辞各报一次 → 只留一条。"""
+    existing = [_c("市场规模和增长趋势", "数据来源口径不同", sb="[LOC1-1-2]")]
+    found = [_c("市场规模与增长趋势", "样本覆盖范围不同", sb="[LOC1-2-2]")]
+    out = _dedupe_conflicts(found, existing)
+    assert out == [], "近重复措辞应被合并掉（保留先出现的）"
+
+
+def test_dedupe_keeps_conflicts_with_different_numbers() -> None:
+    """数值口径不同的冲突必须留下——这是矛盾检测的核心产出，不能被去重吃掉。
+
+    注意构造：两侧都要不同。若 claim_b 与原话相同，会先命中**既有判据 2**
+    （任一侧原话重复即合并），那是 P3 收尾定下的取舍，与近重复无关。
+    """
+    existing = [_c("2024年市场规模为62亿元", "统计范围含交付与实施")]
+    found = [_c("2024年市场规模为180亿元", "样本仅覆盖平台软件")]
+    out = _dedupe_conflicts(found, existing)
+    assert len(out) == 1, "数值互斥的口径差异是真冲突，不该被当重复"
+
+
+def test_dedupe_still_merges_when_one_side_repeats_exactly() -> None:
+    """钉住既有取舍（判据 2）：同一句原话与两个不同对手配对时只留先出现的。
+
+    这条不是新逻辑，是防止我加近重复时把原有语义改掉。
+    """
+    existing = [_c("A 方口径 62 亿元", "B 方口径 180 亿元")]
+    found = [_c("A 方口径 62 亿元", "C 方口径 1800 亿元")]
+    assert _dedupe_conflicts(found, existing) == []
+
+
+def test_dedupe_matches_dirty_claim_after_sanitize() -> None:
+    """历史 checkpoint 里的脏 claim（带编号 + markdown）仍能与新报的同一条去重。"""
+    dirty = "**市场规模和增长趋势** [WEB1-1-1]"
+    existing = [_c(dirty, "数据来源口径不同", sb="[LOC1-1-2]")]
+    found = [_c("市场规模与增长趋势", "样本覆盖范围不同", sb="[LOC1-2-2]")]
+    assert _dedupe_conflicts(found, existing) == []
