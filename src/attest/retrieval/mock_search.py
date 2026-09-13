@@ -11,6 +11,13 @@
 因此这里加了一层**主题路由**：query 命中某主题的 `topic_keywords` 时，
 只在该主题的 records 内检索。识别不到主题（或命中多个主题）**不静默**——
 回退全库并打 warning，让"路由失效"这件事可见。
+
+⚠️ **"非真实命中"一律标 0 分（T7.10 起）**：仅"打 warning + 回退全库"是不够的——
+下游会把跨主题捞回来的记录当成证据，写出**张冠李戴的报告**（实测：问「大学生就业」，
+报告里全是知识库/数据库市场的数字）。所以这里把"无法判别主题"这一事实**编码进结果**：
+未命中明确主题时，返回的每一条 `score` 都置 `0.0`（语义＝"非本 query 的真实命中"）。
+下游成文前的**证据充足性闸门**据此拒编（见 `agents/analyst.py::assess_evidence_sufficiency`），
+而不是把不相关素材硬凑成一份看起来完整的报告。
 """
 
 from __future__ import annotations
@@ -74,31 +81,36 @@ class FixtureSearchClient:
 
     # ---------------------------------------------------------------- 主题路由
 
-    def _route(self, query: str) -> tuple[list[dict], str]:
-        """按 query 选择候选记录集。返回 (候选 records, 路由说明)。"""
+    def _route(self, query: str) -> tuple[list[dict], str, bool]:
+        """按 query 选择候选记录集。返回 `(候选 records, 路由说明, 是否命中明确主题)`。
+
+        第三个返回值 `matched` 是**下游拒编的判据**：False 表示"这次检索没能判明主题，
+        返回的是跨主题混合池，任何一条都不能算作本 query 的真实命中"。
+        """
         if not self.topic_routing or not self._topic_kw:
-            return self._records, "全库（未启用主题路由）"
+            # 显式关闭主题路由 = 有意为之的对照实验，不是"失败"，故 matched=True。
+            return self._records, "全库（未启用主题路由）", True
 
         hit_topics = [
             t for t, kws in self._topic_kw.items() if any(kw in query for kw in kws)
         ]
         if len(hit_topics) == 1:
-            return self._by_topic[hit_topics[0]], f"主题={hit_topics[0]}"
+            return self._by_topic[hit_topics[0]], f"主题={hit_topics[0]}", True
         if not hit_topics:
             # 不静默：路由失败必须可见，否则会以为隔离生效了
             log.warning(f"[fixture] 未识别出主题，回退全库检索（可能导致跨主题污染）：{query!r}")
-            return self._records, "全库（未识别主题）"
+            return self._records, "全库（未识别主题）", False
         if len(hit_topics) > self.max_topics_per_query:
             log.warning(
                 f"[fixture] query 命中多个主题 {hit_topics}，无法判别，回退全库：{query!r}"
             )
-            return self._records, f"全库（命中多主题 {hit_topics}）"
-        return self._by_topic[hit_topics[0]], f"主题={hit_topics[0]}"
+            return self._records, f"全库（命中多主题 {hit_topics}）", False
+        return self._by_topic[hit_topics[0]], f"主题={hit_topics[0]}", True
 
     # ---------------------------------------------------------------- 检索
 
     def search(self, query: str, *, max_results: int = 5) -> list[SearchResult]:
-        pool, route_note = self._route(query)
+        pool, route_note, matched = self._route(query)
         ranked: list[tuple[int, float, dict]] = []
         for rec in pool:
             hits = sum(1 for kw in rec.get("keywords", []) if kw and kw in query)
@@ -125,14 +137,25 @@ class FixtureSearchClient:
                 f"兜底补齐 {len(fallback_ids)} 条（标 score=0）：{query!r}"
             )
 
+        if not matched:
+            # 主题无法判别 → 池子本身就是跨主题混合，**没有任何一条**算真实命中。
+            # 全部置 0 分，让下游闸门能识别"本轮没有可用证据"并拒编。
+            log.warning(
+                f"[fixture] 路由未命中（{route_note}）→ 本次 {len(chosen)} 条结果全部置 0 分，"
+                f"不作为真实证据：{query!r}"
+            )
+
         return [
             SearchResult(
                 source="web",
                 title=rec.get("title", "(无标题)"),
                 url=rec.get("url", ""),
                 content=rec.get("content", ""),
-                # 兜底条目标 0 分：下游（矛盾比对 / 缺口覆盖）据此排除，不假装命中
-                score=0.0 if id(rec) in fallback_ids else round(rec.get("score", 0.0), 4),
+                # 标 0 分的两种情形：① 兜底补齐；② 主题未命中（整池都不可信）。
+                # 下游（矛盾比对 / 缺口覆盖 / 成文闸门）据此排除，不假装命中。
+                score=0.0
+                if (not matched or id(rec) in fallback_ids)
+                else round(rec.get("score", 0.0), 4),
             )
             for _, _, rec in chosen
         ]

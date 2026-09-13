@@ -37,7 +37,7 @@ EVAL_DIR = Path(__file__).resolve().parent
 
 def check_query(client: FixtureSearchClient, query: str, *, max_results: int = 5) -> dict:
     """对单条 query 跑检索，返回覆盖情况。"""
-    pool, route_note = client._route(query)
+    _pool, route_note, matched = client._route(query)
     results = client.search(query, max_results=max_results)
     real = [r for r in results if r.score > 0]
     zero = [r for r in results if r.score == 0]
@@ -46,7 +46,8 @@ def check_query(client: FixtureSearchClient, query: str, *, max_results: int = 5
         "returned": len(results),
         "real": len(real),
         "fallback": len(zero),
-        "degraded": route_note.startswith("全库"),
+        # matched=False 表示"主题无法判别" → search 会把整池结果都置 0 分（不可信）
+        "degraded": (not matched) or route_note.startswith("全库"),
     }
 
 

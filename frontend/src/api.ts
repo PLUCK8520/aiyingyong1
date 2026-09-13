@@ -34,8 +34,17 @@ export interface RunStartEvent extends BaseEvent {
 export interface AgentStartEvent extends BaseEvent {
   event: "agent_start";
   node: string;
+  /**
+   * 节点实例序号（**全局递增**，由后端在任务开始时分配）。
+   *
+   * ⚠️ 配对 `agent_start`/`agent_end` 必须用它，不能用节点名：`scout_web` 会扇出多路
+   * 并行（同名同时开始、**乱序结束**），按名配对会把它们的耗时混成一条。
+   */
   index: number;
+  /** LangGraph `debug` 流的任务 id。同一节点的多路并行靠它区分（后端按此配对）。 */
+  task_id: string;
   ts: number;
+  /** 开始事件里恒为空数组——节点返回值只有结束时才知道，见 `AgentEndEvent.outputs`。 */
   outputs: string[];
 }
 
@@ -43,10 +52,16 @@ export interface AgentEndEvent extends BaseEvent {
   event: "agent_end";
   node: string;
   index: number;
+  task_id: string;
   ts: number;
   /** 真实耗时（ms）。后端从 trace 镜像；取不到为 null，UI 显示 "—" 而不是 0。 */
   duration_ms: number | null;
   brief: string;
+  /**
+   * 该节点真实返回的产出字段名（取结束事件里的，**不是**开始事件里的空数组）。
+   * 异常/中断补发的结束事件不带此字段。
+   */
+  outputs?: string[];
 }
 
 export interface AwaitingConfirmEvent extends BaseEvent {
@@ -64,6 +79,8 @@ export interface ReportReadyEvent extends BaseEvent {
   tokens: number;
   audit_summary: Record<string, unknown>;
   citation_check: Record<string, unknown>;
+  /** T7.10：见 `EvidenceSufficiency`。老后端不返回时为 undefined，前端按"充足"处理。 */
+  evidence_sufficiency?: EvidenceSufficiency;
   llm_calls: number;
   node_pairs_ok: boolean;
   mock: boolean;
@@ -129,6 +146,34 @@ export interface ReferenceItem {
   snippet: string;
 }
 
+/**
+ * T7.10 · 证据充足性评估（`analyst` 节点产出）。
+ *
+ * `sufficient === false` 表示本轮**拒编**：检索拿不到能支撑结论的相关证据，
+ * `report` 是一页如实说明（"查了什么 / 为什么不出结论 / 怎么办"），**不是调研结论**。
+ * 前端据此显示提示条——否则用户看到一份"结论"却没有任何引用，只会以为系统坏了。
+ *
+ * 契约来源：`src/attest/agents/analyst.py` 的 `assess_evidence()`。
+ */
+export interface EvidenceSufficiency {
+  sufficient: boolean;
+  objective?: string;
+  /** 检索到的原始条目数（含跨主题兜底填充） */
+  n_evidence?: number;
+  /** 通过可用性判据（判别相关度 ≥ 3）的条目数 */
+  n_selected?: number;
+  /** 其中**真实命中**（检索计分 > 0）的条目数 */
+  n_grounded?: number;
+  n_judged?: number;
+  /** 本次用的判据描述，例如"证据判别相关度 ≥ 3" */
+  basis?: string;
+  sub_questions?: string[];
+  covered_sub_questions?: string[];
+  uncovered_sub_questions?: string[];
+  /** 人话原因（拒编时非空），直接可展示 */
+  reasons?: string[];
+}
+
 export interface ReportResult {
   query: string;
   route: string | null;
@@ -140,6 +185,8 @@ export interface ReportResult {
   audit_items: unknown[];
   profile: Record<string, string>;
   plan: { objective?: string; outlines?: string[]; sub_questions?: string[] };
+  /** T7.10：证据充足性。`sufficient === false` ⇒ 本报告是拒编页，不是调研结论。 */
+  evidence_sufficiency?: EvidenceSufficiency;
   cost_incurred: number;
   tokens_incurred: number;
   references: Record<string, ReferenceItem>;
@@ -329,6 +376,7 @@ export const NODE_LABEL: Record<string, string> = {
   reflect: "反思补检",
   analyst: "撰写报告",
   auditor: "引用审计",
+  memory_writer: "结论沉淀",
 };
 
 export function nodeLabel(node: string): string {

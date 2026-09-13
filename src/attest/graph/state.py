@@ -62,6 +62,10 @@ class GraphState(TypedDict, total=False):
     rewrite_count: int
     #: T4.4 模型路由器：正文（analyst）本次使用的档位 strong|fast。供 trace 与降级判断。
     model_tier: str
+    #: T7.10 证据充足性评估（analyst 是唯一写入者，覆盖语义）。
+    #: `sufficient=True` 时报告基于 `n_selected` 条可用证据；`False` 时 analyst **拒编**，
+    #: `report` 是一页如实说明。审计与沉淀据此跳过——对"未产出的结论"做审计没有意义。
+    evidence_sufficiency: dict[str, Any]
 
 
 #: 供 build.py 初始化用：所有 reducer 字段必须给初值
@@ -84,6 +88,7 @@ INITIAL_STATE: dict[str, Any] = {
     "audit_summary": {},
     "rewrite_count": 0,
     "model_tier": "strong",
+    "evidence_sufficiency": {},
 }
 
 

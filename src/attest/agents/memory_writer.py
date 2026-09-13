@@ -40,6 +40,14 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     report_id = str(state.get("thread_id") or "unknown")
     audit_items = list(state.get("audit_items") or [])
 
+    # T7.10：拒编页没有任何 supported 结论，沉淀无从谈起。显式跳过（而不是"跑一遍写 0 条"），
+    # 让"为什么没沉淀"在 trace 里可归因。
+    suff = state.get("evidence_sufficiency") or {}
+    if suff and suff.get("sufficient") is False and not audit_items:
+        ctx.trace.emit("memory_write", node=NODE, skipped="证据不足（拒编页无结论可沉淀）")
+        log.node(TAG, NODE, "跳过", reason="拒编页无结论可沉淀")
+        return {}
+
     candidates = distill_from_report(report_id=report_id, audit_items=audit_items)
     written, rejected = mem.add(candidates)
 

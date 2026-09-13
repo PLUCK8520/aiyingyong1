@@ -454,3 +454,46 @@ def test_rehydrate_returns_none_for_completed_thread(tmp_path: Path) -> None:
             await mgr.stop()
 
     run(_check())
+
+
+# ============================================================ 12. 实时进度（T6.2 增强）
+
+def test_agent_start_fires_while_node_is_still_running(tmp_path: Path) -> None:
+    """**实时进度**：`agent_start` 必须在节点**开始执行时**发出，与 `agent_end` 分开。
+
+    这条钉住 2026-09-13 的流改造。旧实现在 `updates` 流上打点，而 `updates` 只在节点
+    **跑完之后**才产出 chunk → 每行的起止同刻到达、瞬间闭合，长节点期间界面完全静止
+    （实测 `evidence_judge` 单次 188s / 148s，用户等 8 分钟里约 6 分钟屏幕没变化，
+    看起来就是卡死）。现在改用 `debug` 流的 `task` / `task_result` 事件。
+    """
+    from app.session import SessionManager
+
+    settings = make_settings(tmp_path, human_confirm=False)
+
+    async def _check() -> None:
+        mgr = SessionManager(settings)
+        await mgr.start()
+        try:
+            s = await mgr.create_session("t-live", "调研'企业知识库 Agent 平台'市场")
+            await mgr.run(s)
+
+            order = [
+                (e.get("event"), e.get("node"))
+                for e in s.events
+                if e.get("event") in ("agent_start", "agent_end")
+            ]
+            # 顺序上"上一个节点结束"必须早于"下一个节点开始"——证明是实时流，不是批量补发
+            assert order.index(("agent_end", "memory_loader")) < order.index(
+                ("agent_start", "planner")
+            ), f"节点事件不是交错出现的：{order[:8]}"
+            # 同一节点的 start 必须早于自己的 end
+            assert order.index(("agent_start", "evidence_judge")) < order.index(
+                ("agent_end", "evidence_judge")
+            )
+            # 并行扇出：同一 superstep 内多个 scout_web 的 start 连续出现（并行启动的证据）
+            starts = [n for ev, n in order if ev == "agent_start"]
+            assert starts.count("scout_web") >= 2, f"扇出未并行：{starts}"
+        finally:
+            await mgr.stop()
+
+    run(_check())

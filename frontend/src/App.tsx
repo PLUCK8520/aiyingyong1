@@ -97,7 +97,17 @@ export default function App() {
         setTimeline((prev) =>
           prev.map((row) =>
             row.index === ev.index
-              ? { ...row, duration_ms: ev.duration_ms, brief: ev.brief, end: ev.ts }
+              ? {
+                  ...row,
+                  duration_ms: ev.duration_ms,
+                  brief: ev.brief,
+                  end: ev.ts,
+                  // 产出字段名只有结束事件才带（开始事件里恒为空）——
+                  // 不在这里合并的话，实时视图看不到 outputs，而刷新后 `GET /api/trace`
+                  // 又把它补上了，两处对不上（2026-09-13 核对契约时发现）。
+                  // 缺失时保留原值：异常中断补发的结束事件不带 outputs，别把它清空。
+                  outputs: ev.outputs ?? row.outputs,
+                }
               : row,
           ),
         );
@@ -374,6 +384,7 @@ export default function App() {
             <ReportView
               markdown={report.report || report.direct_answer}
               references={report.references}
+              sufficiency={report.evidence_sufficiency}
             />
           ) : (
             <div className="panel flex flex-1 flex-col items-center justify-center p-8">

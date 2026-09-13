@@ -32,7 +32,7 @@ from typing import Any, AsyncIterator, Literal
 
 from attest.agents.human_confirm import confirm_payload
 from attest.config import Settings
-from attest.graph.build import build_context, build_graph, initial_state
+from attest.graph.build import build_context, build_graph, graph_node_sequence, initial_state
 from attest.logging import get_logger
 from attest.memory.checkpointer import make_async_checkpointer
 from attest.reporting import export_report
@@ -71,6 +71,10 @@ class Session:
     #: 节点真实耗时镜像（node → duration_ms），由本 run 的 trace 同步进来。
     #: ⚠️ 只做"读 trace.summary() 的公开字段"，不解析文件格式——前端契约仍是 SSE。
     trace_durations: dict[str, float] = field(default_factory=dict)
+    #: 未闭合的任务行：`task_id → (时间线行号, 节点名)`。
+    #: debug 流的 `task` / `task_result` 用它配对——**不能按节点名配对**，
+    #: 因为 Send 扇出会让同名节点并行且乱序结束（见 `_handle_debug`）。
+    task_rows: dict[str, tuple[int, str]] = field(default_factory=dict)
     #: 最终产物（报告 / 直答 / 引用校验 / 审计摘要）
     result: dict[str, Any] = field(default_factory=dict)
     #: 错误信息（status=error 时有值）
@@ -208,8 +212,10 @@ class SessionManager:
             - `awaiting_confirm` → 静态断点挂起，前端应弹大纲确认
             - `error`        → 异常
 
-        ⚠️ **数据源是 `astream(stream_mode=["updates","values"])`，不是 trace.jsonl**。
+        ⚠️ **数据源是 `astream(stream_mode=["updates","values","debug"])`，不是 trace.jsonl**。
         架构设计 §7 的硬决策：前端不读 trace 文件（展示契约与审计格式解耦）。
+        其中 `debug` 流用于**实时**的 `agent_start`（节点开始执行时即发出）、
+        `updates` 流只用于同步 trace 的真实耗时、`values` 流提供终态。
         """
         run_id = f"{session.thread_id}-{int(time.time())}"
         trace = TraceWriter(path=self.settings.trace_dir / "trace.jsonl", run_id=run_id)
@@ -237,19 +243,22 @@ class SessionManager:
 
             final: dict[str, Any] = {}
             async for chunk in app.astream(
-                input_value, cfg, stream_mode=["updates", "values"]
+                input_value, cfg, stream_mode=["updates", "values", "debug"]
             ):
                 mode, payload = chunk  # type: ignore[misc]
-                if mode == "updates":
-                    for node, increment in (payload or {}).items():
-                        if str(node).startswith("__"):
-                            continue
-                        # 先把本节点耗时从 trace 同步过来（`updates` 到达时节点已跑完，
-                        # trace 的 node_end 已写入），再发事件。见 `_emit_node_events`。
-                        self._sync_durations(session, trace)
-                        self._emit_node_events(session, str(node), increment)
+                if mode == "debug":
+                    # debug 流在节点**开始执行时**就发 `task`（结束发 `task_result`）——
+                    # 这是"实时进度"的唯一可靠来源：`updates` 只在节点跑完后才到，
+                    # 长节点（实测 evidence_judge 单次 188s）期间界面会长时间零更新，
+                    # 用户以为卡死。详见 `_handle_debug`。
+                    self._handle_debug(session, payload, trace)
+                elif mode == "updates":
+                    # 只用于同步真实耗时（此刻该节点的 trace.node_end 已写入）。
+                    self._sync_durations(session, trace)
                 else:
                     final = payload  # type: ignore[assignment]
+            # 防御：异常/中断可能留下未闭合的任务行，补终态（耗时 None → 前端显示"—"）
+            self._close_open_rows(session)
 
             # ---------- 静态断点判定：停在 human_confirm 前 ----------
             snap = await app.aget_state(cfg)
@@ -282,6 +291,9 @@ class SessionManager:
                 "audit_items": final.get("audit_items") or [],
                 "profile": final.get("profile") or {},
                 "plan": final.get("plan") or {},
+                # T7.10：证据充足性评估。`sufficient=False` 表示本轮**拒编**，
+                # report 是一页如实说明而非调研结论——前端据此显示提示条。
+                "evidence_sufficiency": final.get("evidence_sufficiency") or {},
                 "cost_incurred": round(float(final.get("cost_incurred") or 0.0), 6),
                 "tokens_incurred": int(final.get("tokens_incurred") or 0),
                 "references": self._reference_index(final),
@@ -301,6 +313,7 @@ class SessionManager:
                 "tokens": session.result["tokens_incurred"],
                 "audit_summary": session.result["audit_summary"],
                 "citation_check": session.result["citation_check"],
+                "evidence_sufficiency": session.result["evidence_sufficiency"],
                 "llm_calls": summary.get("llm_calls", 0),
                 "node_pairs_ok": summary.get("node_pairs_ok", False),
                 "mock": self.settings.llm_mode == "mock",
@@ -335,42 +348,91 @@ class SessionManager:
             if node and e.get("duration_ms") is not None:
                 session.trace_durations[str(node)] = float(e["duration_ms"])
 
-    def _emit_node_events(self, session: Session, node: str, increment: Any) -> None:
-        """把 `updates` chunk 翻译成前端协议事件（T6.2）。
+    #: 图中真实存在的节点名。debug 流里还会出现 LangGraph 的内部任务，
+    #: 只对业务节点发进度事件，避免时间线里混入无意义的行。
+    _KNOWN_NODES: frozenset[str] = frozenset(graph_node_sequence())
 
-        ⚠️ **耗时从哪来**：`updates` 模式只在节点**完成后**产出一个 chunk，拿到它时节点已经跑完，
-        所以"在 chunk 到达时先后打两个时间戳"必然得到 0.0ms——那是假数据，不如不给。
-        真实耗时的唯一可靠来源是 trace 的 `node_end.duration_ms`（`agents/base.py::bind` 打点）。
+    def _handle_debug(self, session: Session, payload: Any, trace: TraceWriter) -> None:
+        """把 LangGraph 的 debug 事件翻译成 `agent_start` / `agent_end`（T6.2 协议）。
 
-        ⚠️ **两条流水线的关系**（别搞混）：
-            - trace.jsonl → 审计/评测（含真实耗时、token、成本）；
-            - SSE → 前端展示契约（架构 §7）。
-        本函数从 `session.trace_durations`（由 trace 在无耦合前提下同步过来的一份镜像）取耗时，
-        **不是**去解析 trace 文件格式——前端仍只认 SSE 协议。
+        **为什么要改用 debug 流**（2026-09-13）：
+            `updates` 模式只在节点**跑完之后**产出一个 chunk，所以在它上面打点，
+            只能得到"节点结束的那一刻同时报开始和结束"——时间线里每行都是瞬间闭合的，
+            长节点期间界面毫无变化。实测 `evidence_judge` 单次 188s / 148s，
+            用户等待的 8 分钟里约 6 分钟屏幕是静止的，看起来就是卡死。
+            debug 流的 `task` 事件在节点**开始执行时**发出，`task_result` 在结束时发出，
+            两者带**同一个任务 id**，这正是"实时进度 + 可靠配对"需要的东西。
+
+        **为什么按 `task_id` 配对、而不是按节点名**：
+            Send 扇出会让**同名节点并行**（`scout_web` ×N），且实测**结束顺序与开始顺序不同**
+            （3 路 scout 同时开始、乱序结束）。按名配对会把它们的起止接错，算出荒谬的耗时。
+            `task_id` 是 debug 流里唯一的实例标识，用它配对才正确。
+
+        耗时仍取 **trace 的真实 `node_end.duration_ms`**（`bind` 打点），不从事件间隔估算——
+        两个时间戳都是"事件到达时刻"，差值不是节点真实耗时。
         """
+        if not isinstance(payload, dict):
+            return
+        kind = payload.get("type")
+        p = payload.get("payload") or {}
+        name = str(p.get("name") or "")
+        task_id = str(p.get("id") or "")
+        if not name or not task_id or name not in self._KNOWN_NODES:
+            return
+
         now = time.time()
-        session.current_node = node
-        node_index = sum(1 for e in session.events if e.get("event") == "agent_start") + 1
-        outputs = (
-            sorted(k for k in (increment or {}) if not str(k).startswith("_"))
-            if isinstance(increment, dict) else []
-        )
-        session.push({
-            "event": "agent_start",
-            "node": node,
-            "index": node_index,
-            "ts": now,
-            "outputs": outputs,
-        })
-        session.push({
-            "event": "agent_end",
-            "node": node,
-            "index": node_index,
-            "ts": now,
-            # 真实耗时（毫秒）；trace 里没记到则为 None，前端显示"—"而不是编一个 0
-            "duration_ms": session.trace_durations.get(node),
-            "brief": _brief(node, increment),
-        })
+        if kind == "task":
+            index = sum(1 for e in session.events if e.get("event") == "agent_start") + 1
+            session.task_rows[task_id] = (index, name)
+            session.current_node = name
+            session.push({
+                "event": "agent_start",
+                "node": name,
+                "task_id": task_id,
+                "index": index,
+                "ts": now,
+                "outputs": [],
+            })
+        elif kind == "task_result":
+            row = session.task_rows.pop(task_id, None)
+            if row is None:
+                return
+            index, _node = row
+            result = p.get("result")
+            # 该节点的 trace.node_end 此刻已写入，同步过来再发结束事件（耗时才是真的）
+            self._sync_durations(session, trace)
+            session.push({
+                "event": "agent_end",
+                "node": name,
+                "task_id": task_id,
+                "index": index,
+                "ts": now,
+                "duration_ms": session.trace_durations.get(name),
+                # 产出字段名（来自节点真实返回值）——起止事件分离后，outputs 只能在结束时拿到
+                "outputs": sorted(k for k in (result or {}) if not str(k).startswith("_"))
+                if isinstance(result, dict) else [],
+                "brief": _brief(name, result),
+            })
+
+    @staticmethod
+    def _close_open_rows(session: Session) -> None:
+        """把未闭合的任务行补上终态。
+
+        正常路径下每个 `task` 都有配对的 `task_result`（已实测：15 个任务 15 对），
+        这里是**防御**：异常/中断时宁可给一行 `duration_ms=None`（前端显示"—"），
+        也不要让进度列表里永远挂着一个转圈的"进行中"。
+        """
+        for task_id, (index, name) in list(session.task_rows.items()):
+            session.push({
+                "event": "agent_end",
+                "node": name,
+                "task_id": task_id,
+                "index": index,
+                "ts": time.time(),
+                "duration_ms": None,
+                "brief": "（未正常结束）",
+            })
+        session.task_rows.clear()
 
     @staticmethod
     def _reference_index(final: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -414,6 +476,9 @@ def _brief(node: str, increment: Any) -> str:
     if node == "reflect":
         return f"补检 {len(increment.get('reflect_targets') or [])} 路"
     if node == "analyst":
+        suff = increment.get("evidence_sufficiency") or {}
+        if suff and suff.get("sufficient") is False:
+            return f"证据不足，拒编（可用 0 / 原始 {suff.get('n_evidence', 0)} 条）"
         check = increment.get("citation_check") or {}
         return f"引用 {check.get('referenced', 0)} 处"
     if node == "auditor":

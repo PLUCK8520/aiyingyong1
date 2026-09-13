@@ -156,6 +156,20 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         ctx.trace.emit("audit_skipped", node=NODE, reason="审计关闭或无报告")
         return {}
 
+    # T7.10：证据不足时的报告是**拒编页**（不含任何带引用的结论），审计没有对象。
+    # 跑一遍只会得到"0 条判定"，还会把 citation_check 覆盖成"未通过"（报告里没有引用编号）——
+    # 那是噪音，如实跳过并留痕才是正确语义。
+    suff = state.get("evidence_sufficiency") or {}
+    if suff and suff.get("sufficient") is False:
+        ctx.trace.emit(
+            "audit_skipped",
+            node=NODE,
+            reason="证据不足，报告为拒编页，无引用可审",
+            n_evidence=suff.get("n_evidence"),
+        )
+        log.node(TAG, NODE, "跳过", reason="拒编页无引用可审")
+        return {}
+
     evidence: list[Evidence] = list(state.get("evidence") or [])
     plan = state.get("plan") or {}
     objective = plan.get("objective", "调研报告")

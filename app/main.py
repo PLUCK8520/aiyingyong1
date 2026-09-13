@@ -393,6 +393,8 @@ def _timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["end"] = ev.get("ts")
             row["duration_ms"] = ev.get("duration_ms")
             row["brief"] = ev.get("brief", "")
+            # outputs 由结束事件携带（起止分离后，节点返回值只有结束时才知道）
+            row["outputs"] = ev.get("outputs") or row.get("outputs") or []
             rows.append(row)
     # 未闭合的（正在跑 / 被中断）也给出，前端显示"进行中"
     for row in open_rows.values():
