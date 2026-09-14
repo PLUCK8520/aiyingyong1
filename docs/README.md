@@ -26,6 +26,7 @@ Attest 用一条多 Agent 流水线解决：意图分流 → 任务规划 → �
 | ♻️ 研究闭环 | 报告结论与证据自动入向量库，后续调研可命中——越用越聪明 |
 | 📏 评测流水线 | Token 成本（每份报告）/ 引用有效率 / 大纲覆盖度 / 完成率 / 延迟五指标，版本回归对比 + **baseline 对照组** |
 | 📡 全链路 Trace | 每节点 start/end/token/成本写 JSONL，前端渲染执行时间线 + 成本面板 |
+| 📚 知识库自助管理 | Web 端上传 / 移除本地文档（md / txt / pdf），入库即时生效——**不接网络检索也能出带 `[LOC*]` 引用的真报告** |
 
 ## 架构
 
@@ -52,7 +53,7 @@ Attest 用一条多 Agent 流水线解决：意图分流 → 任务规划 → �
 | 层 | 选型 |
 |---|---|
 | 编排 | LangGraph（Send API / interrupt-resume / checkpointer） |
-| 模型 | Qwen3 系列（DashScope：qwen3.8-max 12/36 元每百万 token、qwen3.8-flash 0.8/2.7，以控制台为准）+ Ollama 本地（离线兜底） |
+| 模型 | **默认目标档**：Qwen3 系列（DashScope：qwen3.8-max 12/36 元每百万 token、qwen3.8-flash 0.8/2.7，以控制台为准）+ Ollama 本地（离线兜底）。**当前实跑档**：智谱 `glm-4-flash` 免费档（走通用 OpenAI 兼容档接入）——⚠️ 该档**指令服从性不足以支撑引用契约**，见 P8/T8.6 |
 | 接入 | base_url 锁华北2(北京) —— 百炼免费额度**仅支持北京地域实时推理** |
 | 检索 | Tavily（网络）+ Chroma（本地向量，接口可切 Milvus）+ rank-bm25 + jieba + RRF + qwen3.7-text-rerank |
 | 存储 | SQLite（检查点/画像）→ 可切 PostgreSQL |
@@ -61,7 +62,11 @@ Attest 用一条多 Agent 流水线解决：意图分流 → 任务规划 → �
 
 ## 快速开始
 
-> 开发中。CLI 调研链路 P2 后可用；Web 工作台 P6 后可用。以下为最终形态。
+> **状态（2026-09-14）：P-1 ~ P8 全部交付**，CLI 与 Web 工作台均可用。
+> ⚠️ 两处如实说明：① P8 批次（知识库 Web 管理 / 报告导出 / 计时心跳 / 局域网演示 + 两个 P0 修复）
+> **代码完成但尚未提交**（工作区改动未入库）；② **当前账号下只有智谱 `glm-4-flash` 免费档可用**
+> （强模型档余额不足、SiliconFlow 无额度），报告可用但**质量不足以交付**，详见
+> [docs/进度快照-2026-09-14.md](docs/进度快照-2026-09-14.md)。
 > 开工前先跑 **P-1 环境预检**（Python 3.13 + chromadb + jieba + rank-bm25 实测安装，避坑记录见 `docs/env-report.md`）。
 > 开发与测试默认走**离线 mock**（Tavily 录制回放），只有录 fixture 与验收才打真实 API。理由：百炼 LLM 额度每模型 100 万 token，按单份报告 30 万 token 估算**只够约 3 次**，Tavily 也仅 1000 credits/月——**额度瓶颈在开发期，不在演示期**。
 
@@ -94,11 +99,29 @@ python scripts/chat.py --profile                               # 查看当前画
 
 测试：`pytest`（默认离线、不消耗 API 额度）
 
+知识库（P8）：把自己的资料变成证据源——**不接网络检索（`ATTEST_SEARCH_MODE=mock`）也能出带
+`[LOC*]` 引用的真报告**。两条路径：
+```bash
+# ① Web：工作台左栏切到「知识库」→ 拖拽上传（.md / .markdown / .txt / .pdf，单文件 ≤ 8MB）
+# ② CLI：
+python scripts/ingest_local.py <文件或目录>     # 入库
+python scripts/chat.py "你的问题"                # 入库后立即可被检索召回
+```
+> ⚠️ 上传目录 = `ATTEST_LOCAL_DOCS`（默认 `data/fixtures/local`，**与仓库自带示例语料同目录**）。
+> 该目录已在 `.gitignore` 里白名单化（只放行 `local_*.md`），**你上传的资料不会被提交到仓库**；
+> 但如果你改用其它目录，请自行确认它也在忽略范围内。
+> ⚠️ 入库的文档**不会自动删除**：`GET /api/kb` 可查清单，`DELETE /api/kb/{name}` 或页面上 hover「移除」可摘除。
+
 ## Roadmap
 
-**P6 已交付**（2026-09-11）：后端 `app/session.py` + `app/main.py`（8 路由，SSE 支持
+**P6 已交付**（2026-09-11）：后端 `app/session.py` + `app/main.py`（SSE 支持
 `Last-Event-ID` 断线重连）+ 前端 `frontend/`（Vite + React + TS + Tailwind，
 会话侧栏 / 流式进度 / 报告双栏 + 引用悬浮卡 / 大纲确认 / 时间线 + 成本面板）。
+
+**P7 已交付**（2026-09-12，`v1.0`）：评测流水线（五指标 + baseline 对照组）/ 研究闭环 / md 导出 + 一分钟展示稿。
+**P8 已交付**（2026-09-14，代码已就位未提交）：知识库 Web 管理（上传 / 移除 / 重建，`src/attest/kb.py`
++ `KBView.tsx`）/ 报告导出（复制 / 下载 md / 打印）/ 运行计时心跳 / 局域网演示（`scripts/start.bat --lan`）
++ 两个 P0 修复（判别编号丢方括号导致全部查询误判拒编；零引用时引用契约失效被伪装成"审计通过"）。
 
 一键启动（Windows）：`scripts\start.bat`；macOS/Linux：`make dev`。
 手动起：
@@ -110,10 +133,13 @@ cd frontend && npm run dev
 ```
 开大纲确认：起后端前设 `ATTEST_HUMAN_CONFIRM=1`。API 文档：`http://127.0.0.1:8000/docs`。
 
-验证：`pytest` 114 passed / `scripts/api_smoke.py` 36 项全通过 /
-`scripts/p6_e2e_probe.py` 11 项 / `scripts/p6_confirm_probe.py` 12 项 /
-`scripts/p6_frontend_probe.py` 13 项（详见开发任务清单 P6 节）。
-⚠️ **前端视觉与交互未经人工验收**（本机 Chromium 受限），需实际打开浏览器确认。
+验证（最近一次实跑，2026-09-14）：`pytest` **273 用例 / 268 passed**，5 个失败**全部是运行环境
+沙箱的删除守卫所致**（`safe-delete` 拦下测试自身要删的临时文件，非代码缺陷；无守卫环境为 273 passed）/
+`scripts/api_smoke.py` 36 项 / `scripts/p6_e2e_probe.py` 11 项 / `scripts/p6_coldstart_probe.py`
+（跨进程恢复 start 4/4 · recover 10/10）/ `python -m eval.mini` M1~M6 全绿 /
+`npm run build`（tsc + vite）0 错误。
+✅ **前端视觉与交互已于 2026-09-12 用真实浏览器（agent-browser + Chrome）实测通过**
+（首页 / 全流程 / 报告双栏 / 引用悬浮卡 / 时间线 / 控制台零报错；知识库视图与上传另于 09-13 实测通过）。
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
@@ -124,15 +150,17 @@ cd frontend && npm run dev
 | P3 | 本地混合检索 + 动态并行 + 反思循环 + 矛盾检测 + **最小评测尺子** | ✅ |
 | P4 | 引用审计 + 预算熔断 + 模型路由 | ✅ |
 | P5 | 三层记忆 + 人工确认 + 断点续跑 | ✅ |
-| P6 | Web 工作台（SSE / 时间线 / 成本面板） | ✅ 代码与三层验证完成；⚠️ 浏览器视觉待人工验收 |
-| P7 | 评测流水线（含 baseline）/ 研究闭环 / md 导出 + 展示稿（追问与图表**已砍**） | ✅ |
+| P6 | Web 工作台（SSE / 时间线 / 成本面板） | ✅（浏览器实测已补） |
+| P7 | 评测流水线（含 baseline）/ 研究闭环 / md 导出 + 展示稿（追问与图表**已砍**） | ✅ `v1.0` |
+| P8 | 知识库 Web 管理（上传/移除/重建）· 报告导出 · 运行计时心跳 · 局域网演示 · 两处 P0 修复 | ✅ 代码完成（⚠️ 未提交） |
 
-> 图例：✅ 已交付（有测试/冒烟证据，tag 见 `p0`–`p5`）· ⬜ 待开发。
+> 图例：✅ 已交付（有测试/冒烟证据，tag 见 `p0`–`p6` + `v1.0`）· ⬜ 待开发。
 > 说明：P-1/P0/P1/P2 四阶段在早期合并于同一提交（`3bb03c2`），故 `git tag` 中 `p0`/`p1`/`p2` 指向同一提交，标注为补打；`p3`/`p4`/`p5` 为各自阶段的独立交付点。**所有已交付阶段的验证均在离线 mock 下完成（真实 API 未消耗额度）。**
+> ⚠️ **P8 未提交**：`HEAD` 停在 `de9d8d0`，工作区 21 改 + 7 新增未入库，也未打 tag。
 
 **交付线**：P2 可演示 / **P5 可讲**（面试技术面底线，CLI + 录屏）/ **P6 可投递**（写进简历）。
 
-详见 [docs/架构设计.md](docs/架构设计.md)（分层与关键决策）· [docs/需求分析.md](docs/需求分析.md)（要满足什么需求）· [docs/功能设计.md](docs/功能设计.md)（每个功能怎么设计、失败怎么办）· [docs/开发任务清单.md](docs/开发任务清单.md)（分几期、怎么验收）。
+详见 [docs/进度快照-2026-09-14.md](docs/进度快照-2026-09-14.md)（**当前状态一页纸**：做到哪一步 / 验证证据 / 未完成与未验证清单）· [docs/架构设计.md](docs/架构设计.md)（分层与关键决策）· [docs/需求分析.md](docs/需求分析.md)（要满足什么需求）· [docs/功能设计.md](docs/功能设计.md)（每个功能怎么设计、失败怎么办）· [docs/开发任务清单.md](docs/开发任务清单.md)（分几期、怎么验收）。
 
 ## 说明
 
