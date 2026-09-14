@@ -40,6 +40,13 @@ def check_report(report: str, index: CitationIndex) -> dict[str, Any]:
         "unresolved": unresolved,
         "unused": unused,
         "evidence_total": len(index),
+        # T8.6：正文**一个编号都没有**，而索引里明明有证据 —— 引用契约整体失效。
+        # 必须单独标出来：这不是"引用有瑕疵"，而是"逐句回查对这份报告不适用"。
+        # 实测（2026-09-13，glm-4-flash）正文 0 编号时，`unresolved` 与
+        # `unsupported` 会**双双为 0**，审计摘要看起来一片干净——凭空生成的内容
+        # 反而比"有编号但引错"更安全地混过去。`pass` 虽已为 False，
+        # 但只有这个显式标志能让审计/前端做出正确处置（见 `auditor` 的未回查横幅）。
+        "no_citations": bool(len(index)) and not referenced,
         "unique_sources": len(url_counts),
         "duplicate_sources": duplicates,
         "cited_paragraphs": len(cited_paragraphs),

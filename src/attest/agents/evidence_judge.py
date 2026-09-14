@@ -19,6 +19,7 @@ from typing import Any
 from ..llm.prompts import build_conflict_messages, build_judge_messages
 from ..logging import get_logger
 from ..quality.conflict import pairs_as_ids, select_pairs
+from ..retrieval.citations import normalize_citation_id
 from ..schemas import Conflict, ConflictResult, JudgeResult
 from .base import NodeContext, report_budget
 
@@ -292,7 +293,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         # 补检这一轮没拿到任何新证据 → **不再重复判别**（否则 judgments 出现重复编号、白烧一次调用）。
         # 只按已有判别重算缺口，把收口交给 reflect 的轮数上限。
         keep_ids = {
-            j.citation_id
+            normalize_citation_id(j.citation_id)
             for j in (state.get("judgments") or [])
             if j.relevance >= MIN_RELEVANCE
         }
@@ -320,7 +321,13 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     inc_cost, inc_toks = resp.cost_cny, resp.total_tokens
 
     all_judgments = list(state.get("judgments") or []) + list(result.judgments)
-    keep_ids = {j.citation_id for j in all_judgments if j.relevance >= MIN_RELEVANCE}
+    # 新数据已由 `Judgment` 的 validator 收敛；这里再收敛一次是**纵深防御**——
+    # `model_construct()` / 手工拼 dict 构造的对象会绕过校验（eval 脚本、离线评测）。
+    keep_ids = {
+        normalize_citation_id(j.citation_id)
+        for j in all_judgments
+        if j.relevance >= MIN_RELEVANCE
+    }
     covered = {e.sub_question for e in all_evidence if e.citation_id in keep_ids}
     gaps = merge_gaps(list(result.gaps), sub_questions, covered)
 

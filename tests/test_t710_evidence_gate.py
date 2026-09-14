@@ -147,6 +147,83 @@ def test_assess_without_judgments_falls_back_to_grounded_score() -> None:
     assert info["sufficient"] is False
 
 
+# ---------------------------- 编号规范化（2026-09-13 实测 P0 的回归防线）
+
+
+def test_judgment_normalizes_citation_id_when_model_drops_brackets() -> None:
+    """校验层：模型给的 `LOC1-1-1` 进模型时就要变成 `[LOC1-1-1]`。"""
+    j = Judgment(citation_id="LOC1-1-1", sub_question=SUBQS[0], relevance=5, confidence=4)
+    assert j.citation_id == "[LOC1-1-1]"
+
+
+def test_assess_matches_evidence_when_model_dropped_brackets() -> None:
+    """**端到端回归**：判别器给高分、编号丢方括号 ⇒ 证据仍必须被选中。
+
+    实测背景（thread `kb-e2e-1`，证据可从 checkpoint 复现）：
+      上传本地文档后，判别器把它判成 relevance=5（共 5 次），但回填的编号是 `LOC1-1-1`，
+      而 evidence 是 `[LOC1-1-1]` —— judgments 56 条 / evidence 72 条，**编号交集 0**；
+      去掉方括号后交集 56/56。旧实现精确匹配，于是 `n_selected=0`，
+      界面上出现一份措辞得体的"证据不足，故拒编"——**把一个字符串 bug 伪装成了合规行为**。
+    """
+    ev = [_ev("[LOC1-1-1]", SUBQS[0], score=0.9)]
+    jd = [Judgment(citation_id="LOC1-1-1", sub_question=SUBQS[0], relevance=5, confidence=4)]
+    selected, info = assess_evidence(_state(ev, jd))
+    assert info["sufficient"] is True, f"不得因编号写法差异而拒编：{info}"
+    assert [e.citation_id for e in selected] == ["[LOC1-1-1]"]
+
+
+def test_assess_tolerates_unvalidated_judgments() -> None:
+    """消费层兜底：**绕过校验构造出来的**脏编号也要能对上（纵深防御）。
+
+    实测澄清（2026-09-13，别把这条写错）：LangGraph 从 checkpoint 反序列化
+    `Judgment` **会**走 pydantic 校验——同一份 checkpoint，修复前读出来是 `LOC1-1-1`、
+    修复后读出来就是 `[LOC1-1-1]`。所以"旧会话"这条路径其实由校验层自动治好了。
+
+    那这里为什么还要测：`model_construct()` / 手工拼 dict 构造出的对象会**跳过校验**
+    （eval 脚本、离线评测、以及把 state 当普通 dict 传的调用方都可能这么干）。
+    消费侧多做一次字符串收敛的成本是一次函数调用，而漏掉它的代价是
+    "复查不出为什么又拒编了"。这类纵深防御值得留。
+    """
+    legacy = Judgment.model_construct(
+        citation_id="LOC1-1-1", sub_question=SUBQS[0], relevance=5, confidence=4, note=""
+    )
+    assert legacy.citation_id == "LOC1-1-1", "model_construct 确实绕过了校验（前提成立才谈得上兜底）"
+    ev = [_ev("[LOC1-1-1]", SUBQS[0], score=0.9)]
+    selected, info = assess_evidence(_state(ev, [legacy]))
+    assert info["sufficient"] is True, f"未走校验的编号也必须能对上：{info}"
+    assert len(selected) == 1
+
+
+def test_truncate_topk_uses_relevance_with_bracketless_ids() -> None:
+    """上下文截断同样按相关性排序——编号对不上会让它退化成"砍尾巴"。"""
+    from attest.agents.analyst import truncate_topk
+
+    legacy = Judgment.model_construct(
+        citation_id="WEB1-1-2", sub_question=SUBQS[0], relevance=5, confidence=4, note=""
+    )
+    ev = [_ev("[WEB1-1-1]", SUBQS[0]), _ev("[WEB1-1-2]", SUBQS[0])]
+    kept = truncate_topk(ev, [legacy], 1)
+    assert [e.citation_id for e in kept] == ["[WEB1-1-2]"], "高分的那条必须留下（而不是砍尾巴）"
+
+
+def test_conflict_sources_are_normalized() -> None:
+    """矛盾清单里的编号也要收敛，否则报告里的编号查不到——比不写更糟。"""
+    from attest.schemas import Conflict
+
+    c = Conflict.model_validate(
+        {
+            "sub_question": SUBQS[0],
+            "topic": "市场规模",
+            "claim_a": "62亿元",
+            "source_a": "WEB1-1-1",
+            "claim_b": "180亿元",
+            "source_b": "[WEB1-1-2]",
+        }
+    )
+    assert c.source_a == "[WEB1-1-1]"
+    assert c.source_b == "[WEB1-1-2]"
+
+
 # --------------------------------------------------------- 4~5. analyst 拒编页
 
 

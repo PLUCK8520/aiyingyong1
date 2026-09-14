@@ -34,7 +34,7 @@ from ..quality.audit import (
     section_failure_ratios,
 )
 from ..quality.citation_check import REF_HEADING, finalize
-from ..retrieval.citations import CitationIndex
+from ..retrieval.citations import CitationIndex, extract_ids
 from ..retrieval.ports import Evidence
 from ..schemas import AuditItem
 from .base import NodeContext
@@ -49,17 +49,44 @@ FUSE_BANNER = (
     "引用审计仅跑初筛。报告仍如实产出，但覆盖度可能不完整。\n"
 )
 
+#: T8.6 正文零引用时的横幅。与降级横幅**同机制、同位置**（一级标题之后），
+#: 因为"这份报告没通过回查"和"这份报告是降级产出的"属于同一类信息：
+#: 都是**告诉读者该怎么看待下面的内容**，不能只写在日志里。
+#:
+#: 为什么必须有这道确定性兜底：实测（2026-09-13）模型可能整篇不写引用编号。
+#: 此时审计器**没有任何对象可审**（`total=0`），摘要里 `unsupported_ratio=0.0`
+#: 会被前端与读者读成"全部通过"——而实际上正文里可能同时存在
+#: 证据根本没支持过的内容（实测出现过凭空生成的"财政补贴 / 社会资本"）。
+#: 也就是说：**引用缺失会让整个核验网失效，且失效的表现是"看起来干净"**。
+UNCHECKED_BANNER = (
+    "> ⚠️ **本报告未通过逐句回查**：正文没有生成任何引用编号，"
+    "因此「每一句事实性结论都能追溯到来源」这一保证对本次报告**不成立**。"
+    "下面的具体数字与表述请勿直接引用；建议补充更聚焦的资料后重跑。\n"
+)
+
+
+def _insert_after_title(report: str, banner: str) -> str:
+    """把横幅插到一级标题之后（无标题则置顶）。调用方负责幂等判定。"""
+    lines = report.splitlines()
+    idx = next((i for i, ln in enumerate(lines) if ln.startswith("# ")), -1)
+    block = ["", banner.rstrip()]
+    if idx == -1:
+        return "\n".join([banner.rstrip(), ""] + lines)
+    return "\n".join(lines[: idx + 1] + block + lines[idx + 1 :])
+
 
 def _with_fuse_banner(report: str, fuse: int) -> str:
     """L2 时把降级横幅插到一级标题之后（无标题则置顶）。幂等——重复调用不叠加。"""
     if fuse < FUSE_HARD or "降级提示" in report:
         return report
-    lines = report.splitlines()
-    idx = next((i for i, ln in enumerate(lines) if ln.startswith("# ")), -1)
-    block = ["", FUSE_BANNER.rstrip()]
-    if idx == -1:
-        return "\n".join([FUSE_BANNER.rstrip(), ""] + lines)
-    return "\n".join(lines[: idx + 1] + block + lines[idx + 1 :])
+    return _insert_after_title(report, FUSE_BANNER)
+
+
+def _with_unchecked_banner(report: str, unchecked: bool) -> str:
+    """正文零引用时插入"未通过回查"横幅。幂等。"""
+    if not unchecked or "未通过逐句回查" in report:
+        return report
+    return _insert_after_title(report, UNCHECKED_BANNER)
 
 
 def _llm_rewrite(
@@ -186,8 +213,13 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         ctx.trace.emit("section_rewrite", node=NODE, history=rewrite_hist, rounds=len(rewrite_hist))
 
     # ---- T4.2a：逐句降级 ----
+    # ⚠️ `unchecked` 必须用**降级前**的正文判定，且先切掉参考资料章节（它本身列编号）。
+    # 否则"审计把不支撑的编号降级成（未证实）"会被误读成"模型没写编号"——
+    # 两条完全不同的故障会显示成同一句横幅，排查时会被带偏。
+    unchecked = bool(evidence) and not extract_ids((report or "").split(REF_HEADING, 1)[0])
     degraded, info = degrade_report(report, items)
     body = degraded.split(REF_HEADING, 1)[0].rstrip()
+    body = _with_unchecked_banner(body, unchecked)
     body = _with_fuse_banner(body, fuse)
     index = CitationIndex.from_evidence(evidence)
     final_report, refs, check = finalize(body, index)
@@ -208,7 +240,24 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         "rewrite_history": rewrite_hist,
         "fuse_level": fuse,
         "section_failure_ratios": section_failure_ratios(items),
+        # T8.6：审计"没有结论"要能与"审计通过"区分开。
+        # 零引用时 total=0，只给数字的话**任何读者都会把它读成干净**——
+        # 这正是「凭空内容随报告交付」的通道，必须显式命名。
+        "inconclusive": unchecked,
+        "inconclusive_reason": (
+            "正文未包含任何引用编号，审计没有可核验的对象——**本次审计没有结论，不等于通过**。"
+            if unchecked
+            else ""
+        ),
     }
+
+    if unchecked:
+        ctx.trace.emit(
+            "audit_inconclusive",
+            node=NODE,
+            reason="正文零引用，无可审计对象",
+            evidence=len(evidence),
+        )
 
     ctx.trace.emit(
         "citation_audit",
@@ -226,6 +275,7 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         degraded=info["degraded"],
         rewrites=summary["rewrites"],
         fuse_level=fuse,
+        inconclusive=unchecked,
     )
 
     return {

@@ -22,6 +22,46 @@ def make_citation_id(kind: SourceKind, round_no: int, subq_no: int, seq: int) ->
     return f"[{tag}{round_no}-{subq_no}-{seq}]"
 
 
+#: 编号的规范内核（不含方括号）。大小写不敏感——模型偶尔写成小写。
+CID_CORE_RE = re.compile(r"(?:WEB|LOC|MEM)\d+-\d+-\d+", re.IGNORECASE)
+
+#: 规范化时要剥掉的包裹字符：半角/全角括号、中文角括号、书名号、引号、空白。
+_CID_TRIM = " \t\r\n[]()（）【】<>《》「」\"'`"
+
+
+def normalize_citation_id(raw: object) -> str:
+    """把引用编号收敛成规范形态 `[KIND{轮次}-{子问题}-{序号}]`。
+
+    **为什么必须有这一层**（2026-09-13 真实档实测，P0 缺陷的修复点）：
+    提示词、证据块、`make_citation_id()` 产出的编号一律是 `[LOC1-1-1]`（**带方括号**），
+    但模型回填 `citation_id` 时会**把方括号丢掉**，写成 `LOC1-1-1`。下游是**字符串精确匹配**
+    （`analyst.assess_evidence` 里的 `relevance.get(e.citation_id)`），于是：
+
+        判别器给出 relevance=5 → 挂在键 `LOC1-1-1` 上
+        → evidence 的 `[LOC1-1-1]` 永远取不到分 → `n_selected=0` → 产出拒编页
+
+    实测数字（thread `kb-e2e-1`，可从 checkpoint 复现）：
+    `judgments` 56 条、`evidence` 72 条，**编号交集 0**；去掉方括号后交集 **56/56**。
+    最恶劣的地方在于**失败被伪装成正常行为**——界面上是一份措辞得体的"证据不足，故拒编"，
+    完全符合零造假铁律的叙事，而实际上是全盘误判：判别器明明把知识库里的文档判成了 5 分。
+
+    这个函数用在两处，缺一不可：
+      - **校验层**（`schemas.py` 的 `field_validator`）：挡住新产生的 LLM 输出；
+      - **消费层**（`evidence_judge` / `analyst`）：兜住 checkpoint 里**已经存下的**脏数据，
+        否则用户"续跑"一个旧会话时缺陷依旧复现。
+
+    非编号输入原样返回（不猜、不构造），保证幂等且不会把无关文本变成编号。
+    """
+    s = str(raw if raw is not None else "").strip().strip(_CID_TRIM).strip()
+    if not s:
+        return ""
+    if CID_CORE_RE.fullmatch(s):
+        return f"[{s.upper()}]"
+    # 编号被整句包住（例："来源：LOC1-1-1"）→ 抽出第一个。宁可不改也不猜。
+    m = CID_CORE_RE.search(s)
+    return f"[{m.group(0).upper()}]" if m else s
+
+
 def assign_citation_ids(
     results: Iterable[SearchResult],
     *,

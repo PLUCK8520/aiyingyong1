@@ -9,6 +9,7 @@ from attest.retrieval.citations import (
     assign_citation_ids,
     extract_ids,
     make_citation_id,
+    normalize_citation_id,
     parse_evidence_block,
     render_evidence_block,
 )
@@ -25,6 +26,37 @@ def _results(*urls: str) -> list[SearchResult]:
 def test_id_format_matches_spec() -> None:
     assert make_citation_id("web", 1, 2, 3) == "[WEB1-2-3]"
     assert make_citation_id("local", 2, 1, 10) == "[LOC2-1-10]"
+
+
+# ---- 编号规范化（2026-09-13 P0 缺陷的修复点，见 normalize_citation_id 文档串）----
+
+
+def test_normalize_restores_missing_brackets() -> None:
+    """模型回填编号时丢方括号——这是实测发生的形态，必须补回来。"""
+    assert normalize_citation_id("LOC1-1-1") == "[LOC1-1-1]"
+    assert normalize_citation_id("WEB2-3-10") == "[WEB2-3-10]"
+
+
+def test_normalize_accepts_wrapped_and_noisy_forms() -> None:
+    assert normalize_citation_id("[LOC1-1-1]") == "[LOC1-1-1]"
+    assert normalize_citation_id(" [LOC1-1-1] ") == "[LOC1-1-1]"
+    assert normalize_citation_id("【LOC1-1-1】") == "[LOC1-1-1]"
+    assert normalize_citation_id("（LOC1-1-1）") == "[LOC1-1-1]"
+    assert normalize_citation_id("来源：LOC1-1-1") == "[LOC1-1-1]"
+    assert normalize_citation_id("loc1-1-1") == "[LOC1-1-1]", "大写收敛，否则仍对不上"
+
+
+def test_normalize_is_idempotent() -> None:
+    once = normalize_citation_id("LOC1-1-1")
+    assert normalize_citation_id(once) == once
+
+
+def test_normalize_leaves_non_ids_untouched() -> None:
+    """不是编号就原样返回——**不许猜、不许构造**，否则会把无关文本变成引用。"""
+    assert normalize_citation_id("") == ""
+    assert normalize_citation_id(None) == ""
+    assert normalize_citation_id("市场规模") == "市场规模"
+    assert normalize_citation_id("1-1-1") == "1-1-1", "缺来源前缀的不算编号"
 
 
 def test_assign_ids_are_positional_and_stable() -> None:

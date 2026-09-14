@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from .retrieval.citations import normalize_citation_id
+
 Route = Literal["direct", "research"]
 
 
@@ -51,6 +53,15 @@ class Judgment(BaseModel):
     confidence: int = Field(ge=1, le=5, description="内容可信度 1-5")
     note: str = ""
 
+    @field_validator("citation_id", mode="before")
+    @classmethod
+    def _normalize_citation_id(cls, v: object) -> str:
+        """收敛模型输出的编号写法（模型常常丢方括号 → 见 `normalize_citation_id` 的说明）。
+
+        用 `mode="before"`：模型可能回非字符串（数字/None），必须在进入类型校验前收敛。
+        """
+        return normalize_citation_id(v)
+
 
 class JudgeResult(BaseModel):
     """T2.4 证据判别整体输出。"""
@@ -78,6 +89,16 @@ class Conflict(BaseModel):
     severity: Severity = "medium"
     summary: str = ""
 
+    @field_validator("source_a", "source_b", mode="before")
+    @classmethod
+    def _normalize_sources(cls, v: object) -> str:
+        """`source_a/b` 也是引用编号，同样会被模型丢掉方括号。
+
+        矛盾清单里的编号要能和 `CitationIndex` 对上，否则报告「争议与分歧」章节
+        会给出查不到的编号——比不写编号更糟（看起来可回查，实际查不到）。
+        """
+        return normalize_citation_id(v)
+
 
 class ConflictResult(BaseModel):
     """T3.7 矛盾检测整体输出。"""
@@ -97,6 +118,12 @@ class AuditItem(BaseModel):
     #: 被判定的句子原文与所属章节——T4.2 降级要靠它定位到正文的哪一句。
     sentence: str = ""
     section: str = ""
+
+    @field_validator("citation_id", mode="before")
+    @classmethod
+    def _normalize_citation_id(cls, v: object) -> str:
+        """同 `Judgment`：审计结果要按编号回查证据，编号对不上就等于审计失效。"""
+        return normalize_citation_id(v)
 
 
 class AuditResult(BaseModel):
