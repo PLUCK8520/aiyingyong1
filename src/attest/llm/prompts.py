@@ -10,10 +10,14 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from ..retrieval.citations import (
     Evidence,
+    extract_ids,
+    normalize_citation_id,
+    render_basis_line,
     render_conflicts_block,
     render_evidence_block,
     render_pairs_block,
@@ -274,6 +278,199 @@ def build_analyst_messages(
         {"role": "system", "content": _append_profile(ANALYST_SYSTEM, profile_block)},
         {"role": "user", "content": user},
     ]
+
+
+# ------------------------------------------------------------------ T9.1 结构化输出协议
+#
+# 背景（2026-09-13/14 四次真实档复现）：弱模型（glm-4-flash 免费档）最不服从事项是
+# "在结论句末挂引用编号"——整篇正文零编号 → 审计无对象可审 → 凭空内容安全混过。
+# T8.6 的末尾纠偏只能算"一次有界尝试"，治本必须把编号的生成从"模型的排版动作"
+# 改成"代码的确定性拼装"。
+#
+# 协议要点：模型按 `<<CHAPTER>> / <<CITE>> / <<TEXT>> / <<END>>` 分章输出，
+# **每章在 <<CITE>> 行声明本章依据的证据编号**（从证据块原样抄录——弱模型最能服从的
+# 动作就是"抄编号"）；代码解析后用 `render_structured_report` 把声明确定性注入正文
+# （章末依据行，见 retrieval/citations.py 的 SECTION_BASIS_MARK 契约）。
+# 模型不服从格式时，`parse_structured_report` 返回 None，调用方降级回纯文本路径
+# （原 T8.6 纠偏重试逻辑不变）——结构化是**增强**，不是新的硬依赖。
+
+CHAPTER_BEGIN = "<<CHAPTER>>"
+CITE_BEGIN = "<<CITE>>"
+TEXT_BEGIN = "<<TEXT>>"
+# 章块结束标记复用 `<<END>>`（与 OBJ_END / REWRITE_END_MARK 同形，解析按 CHAPTER 起点切块）。
+
+ANALYST_STRUCTURED_SYSTEM = (
+    "你是调研撰稿人。基于给定证据撰写结构化中文调研报告。\n"
+    "**写法（正文是分析论述，不是证据罗列）**：\n"
+    "1. 用**自己的话**归纳观点——对比、归因、趋势、对读者的含义；**禁止整段照抄证据原文**，"
+    "证据只在需要支撑结论时以短语形式带入；\n"
+    "2. 同一份证据**只在最相关的章节引用一次**，不要在每章复述同一段证据；\n"
+    "3. 每章至少一句**分析性判断**（谁更强 / 为什么 / 意味着什么），不能只有事实堆叠；\n"
+    "4. 章节内容必须扣住该章标题；某章无对应证据时，直接写「（证据不足）」并说明缺什么，"
+    "**不要拿别的章节的证据来填充**。\n"
+    "**铁律**：\n"
+    "1. 只能使用给定证据里的信息，**禁止补充外部数据或常识推断**；\n"
+    "2. 证据互相矛盾时，单列「争议与分歧」章，摆明双方口径，**不要强行调和**；\n"
+    "3. **不要输出「参考资料」章节**，系统会按正文引用自动追加。\n"
+    "**输出格式（必须严格遵守，不得输出任何标记之外的解释）**：逐章重复以下结构——\n"
+    f"{CHAPTER_BEGIN}\n"
+    "标题：核心摘要\n"
+    f"{CITE_BEGIN}\n"
+    "[WEB1-1-1] [LOC1-1-2]\n"
+    f"{TEXT_BEGIN}\n"
+    "（本章正文。句末可带编号如「…增速约 42% [WEB1-1-1]」，但不强制——\n"
+    f"关键是 {CITE_BEGIN} 行必须把本章用到的证据编号**列全**。）\n"
+    f"{OBJ_END}\n"
+    "格式规则：\n"
+    "1. 第一章固定为「核心摘要」；随后按给定大纲逐章各输出一块；有矛盾清单时，"
+    "最后追加「争议与分歧」一章；\n"
+    f"2. 每块的 {CITE_BEGIN} 行列出**本章论述所依据的全部证据编号**：从给定证据的编号里\n"
+    "   **原样抄录**（形如 [WEB1-1-1]），空格分隔，一行写完；本章无可用证据则该行**留空**，"
+    "并在正文写「（证据不足）」说明缺什么；\n"
+    f"3. 标题行以「标题：」开头；正文放在 {TEXT_BEGIN} 与 {OBJ_END} 之间。"
+)
+
+
+def build_analyst_structured_messages(
+    objective: str,
+    outlines: Sequence[str],
+    evidence: Iterable[Evidence],
+    conflicts: Sequence[object] = (),
+    *,
+    profile_block: str = "",
+) -> list[dict[str, str]]:
+    """结构化协议版撰稿消息（T9.1）。user 与纯文本版一致，差异只在 system 与收尾指令。"""
+    conflict_part = ""
+    if conflicts:
+        conflict_part = (
+            "\n\n已检出的**矛盾清单**（请在「争议与分歧」章逐一呈现，并列双方口径与编号，"
+            "**不要调和、不要取平均、不要选边**）：\n"
+            f"{render_conflicts_block(conflicts)}"
+        )
+    user = (
+        f"{objective_block(objective)}\n\n"
+        f"{outline_block(outlines)}\n\n"
+        f"可用证据：\n{render_evidence_block(evidence)}"
+        f"{conflict_part}\n\n"
+        f"请严格按 {CHAPTER_BEGIN} / {CITE_BEGIN} / {TEXT_BEGIN} / {OBJ_END} 结构逐章输出。"
+    )
+    return [
+        {"role": "system", "content": _append_profile(ANALYST_STRUCTURED_SYSTEM, profile_block)},
+        {"role": "user", "content": user},
+    ]
+
+
+@dataclass(frozen=True)
+class StructuredChapter:
+    """结构化协议解析出的一章。`cite_ids` 已规范化（`[KINDn-n-n]` 形态）且去重。"""
+
+    title: str
+    cite_ids: list[str]
+    body: str
+
+
+_CHAPTER_BLOCK_RE = re.compile(
+    re.escape(CHAPTER_BEGIN) + r"(.*?)(?=" + re.escape(CHAPTER_BEGIN) + r"|\Z)", re.DOTALL
+)
+_TITLE_PREFIX_RE = re.compile(r"^标题\s*[:：]\s*")
+_CID_FULL_RE = re.compile(r"\[(?:WEB|LOC|MEM)\d+-\d+-\d+\]")
+#: "编号裸露行"：整行只由编号与空白组成（一个或多个）。真实档实测（2026-09-14，
+#: glm-4-flash，thread `t91-real-1`）：模型不知道把编号放哪时，会把它**单独挂一行**
+#: 贴在章尾——既非句末引用也非声明，拼装进正文就是一个悬空的 `[WEB1-4-1]`。
+#: 收敛方式：剥出编号并入本章声明集合（走依据行注入），裸露行本身删除。
+_BARE_IDS_LINE_RE = re.compile(r"^(?:\[(?:WEB|LOC|MEM)\d+-\d+-\d+\][\s]*)+$")
+
+
+def parse_structured_report(text: str) -> list[StructuredChapter] | None:
+    """把模型的结构化输出解析成章列表；**一个有效章都解析不出时返回 None**（调用方降级）。
+
+    容错口径（弱模型实测会犯的错，全部按"能救则救、救不了就丢该章"处理）：
+      - 漏写 `<<END>>`：按下一个 `<<CHAPTER>>` 起点（或文本尾）切块，不受影响；
+      - 标题行写成半角冒号 / 漏「标题：」前缀：剥前缀后取首行；
+      - `<<CITE>>` 行编号丢方括号、夹逗号：`normalize_citation_id` 逐词收敛，
+        收敛不成规范编号的词条直接丢弃（不猜）；
+      - 缺 `<<TEXT>>`、标题为空、正文为空的章：**无效，丢弃**（保留它只会产出空章节）。
+    """
+    raw = (text or "").strip()
+    if CHAPTER_BEGIN not in raw:
+        return None
+    chapters: list[StructuredChapter] = []
+    for m in _CHAPTER_BLOCK_RE.finditer(raw):
+        block = m.group(1)
+        # 去掉 <<END>> 及之后（模型可能在 END 后啰嗦；下一块的起点已经把它切开）
+        block = block.split(OBJ_END, 1)[0]
+        if TEXT_BEGIN not in block:
+            continue
+        head_cite, body = block.split(TEXT_BEGIN, 1)
+        if CITE_BEGIN in head_cite:
+            head, cite_raw = head_cite.split(CITE_BEGIN, 1)
+        else:
+            head, cite_raw = head_cite, ""
+        title_lines = [ln for ln in head.strip().splitlines() if ln.strip()]
+        title = _TITLE_PREFIX_RE.sub("", title_lines[0]).strip() if title_lines else ""
+        body = body.strip()
+        if not title or not body:
+            continue
+        cite_ids: list[str] = []
+        for tok in re.split(r"[\s,，、]+", cite_raw.strip()):
+            if not tok:
+                continue
+            cid = normalize_citation_id(tok)
+            if _CID_FULL_RE.fullmatch(cid) and cid not in cite_ids:
+                cite_ids.append(cid)
+        chapters.append(StructuredChapter(title=title, cite_ids=cite_ids, body=body))
+    return chapters or None
+
+
+def render_structured_report(
+    objective: str,
+    chapters: Sequence[StructuredChapter],
+    index: "CitationIndex",
+) -> tuple[str, list[str]]:
+    """把章列表确定性拼装成 Markdown 报告。返回 (报告文本, 被丢弃的编号清单)。
+
+    拼装规则（每条都对应一类真实故障）：
+      1. 声明了但**索引里不存在**的编号：丢弃并记入返回值的第二项（调用方留痕）——
+         模型可能臆造编号，拼装层是最后一道能拦它的确定性关卡；
+      2. 章正文**自带句末编号**的：原样保留（句级对应是最高质量形态，不画蛇添足）；
+      3. 章正文无编号、但 `<<CITE>>` 声明了的：章末追加**依据行**
+         （`（本节论述依据：…）`，只挂"声明了但正文没出现"的编号）——
+         编号从此由代码注入，不再依赖模型的排版服从性；
+      4. 声明为空（应是「（证据不足）」章）：原样输出，不挂依据行；
+      5. 正文里的**编号裸露行**（整行只有编号）：剥出编号并入本章声明集合，
+         裸露行删除——这是弱模型"不知道编号该放哪"的另一种不服从形态
+         （2026-09-14 真实档实测），不收敛就会留下悬空的 `[WEB1-4-1]`。
+    """
+    lines: list[str] = [f"# {objective}", ""]
+    dropped: list[str] = []
+    for ch in chapters:
+        # 规则 5：先收敛裸露编号行
+        body_lines: list[str] = []
+        bare_ids: list[str] = []
+        for ln in ch.body.splitlines():
+            if _BARE_IDS_LINE_RE.match(ln.strip()):
+                bare_ids.extend(extract_ids(ln))
+                continue
+            body_lines.append(ln)
+        body = "\n".join(body_lines).strip("\n")
+
+        valid = [c for c in ch.cite_ids if c in index]
+        dropped.extend(c for c in ch.cite_ids if c not in index)
+        for c in bare_ids:
+            if c in index and c not in valid:
+                valid.append(c)
+            elif c not in index and c not in dropped:
+                dropped.append(c)
+
+        lines.append(f"## {ch.title}")
+        lines.append("")
+        lines.append(body)
+        missing = [c for c in valid if c not in set(extract_ids(body))]
+        if missing:
+            lines.append("")
+            lines.append(render_basis_line(missing))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n", dropped
 
 
 # ------------------------------------------------------------------ T4.2b 章节重写

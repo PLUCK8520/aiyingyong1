@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     fixture_dir: Path = Field(DATA_DIR / "fixtures", alias="ATTEST_FIXTURE_DIR")
 
     context_truncate_chars: int = Field(4000, alias="ATTEST_CTX_TRUNCATE")
+    #: T9.1：analyst 结构化输出协议开关。开（默认）：模型按 <<CHAPTER>>/<<CITE>>/<<TEXT>>
+    #: 分章输出并**声明本章依据的证据编号**，由代码确定性拼装进正文（章末依据行）——
+    #: 编号不再依赖弱模型"句末挂编号"的服从性（2026-09-13/14 实测 glm-4-flash 免费档
+    #: 四次整篇零编号，审计网因此整体失效）。模型不服从格式时自动降级回纯文本路径
+    #: （原 T8.6 纠偏重试逻辑不变）。关掉则完全回到 P8 及以前的行为，便于对照。
+    analyst_structured: bool = Field(True, alias="ATTEST_ANALYST_STRUCTURED")
     #: 单次 LLM 调用的读超时（秒）。实测教训（2026-09-13）：证据判别要一次送 20+ 条证据，
     #: 免费档模型 60s 内回不来 → 三次超时把整轮拖垮。真实档给足余量。
     llm_timeout_s: float = Field(120.0, alias="ATTEST_LLM_TIMEOUT")

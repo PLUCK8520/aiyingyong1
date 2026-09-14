@@ -23,7 +23,12 @@ from dataclasses import replace
 from typing import Any
 
 from ..budget.account import FUSE_HARD
-from ..llm.prompts import build_analyst_messages
+from ..llm.prompts import (
+    build_analyst_messages,
+    build_analyst_structured_messages,
+    parse_structured_report,
+    render_structured_report,
+)
 from ..logging import get_logger
 from ..quality.citation_check import finalize
 from ..retrieval.citations import CitationIndex, extract_ids, normalize_citation_id
@@ -329,13 +334,46 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         **trunc_info,
     )
 
-    messages = build_analyst_messages(
-        objective, outlines, selected, conflicts, profile_block=profile_block(state)
-    )
+    # ---- T9.1：结构化输出协议优先 ----
+    # 模型按 <<CHAPTER>>/<<CITE>>/<<TEXT>> 分章输出并声明本章依据编号，代码确定性拼装
+    # （章末依据行注入编号）；模型不服从格式（parse 返回 None）则降级回纯文本路径，
+    # 后续 T8.6 零引用纠偏逻辑不变——结构化是增强，不是新的硬依赖。
+    structured = bool(getattr(ctx.settings, "analyst_structured", False))
+    if structured:
+        messages = build_analyst_structured_messages(
+            objective, outlines, selected, conflicts, profile_block=profile_block(state)
+        )
+    else:
+        messages = build_analyst_messages(
+            objective, outlines, selected, conflicts, profile_block=profile_block(state)
+        )
     resp = ctx.gateway.chat(messages, task="analyst", temperature=0.3, fuse_level=fuse)
 
     # 索引基于**全量证据**建：筛选只影响"写什么"，不影响"能不能回查"
     index = CitationIndex.from_evidence(evidence)
+
+    if structured:
+        chapters = parse_structured_report(resp.text)
+        if chapters:
+            rendered, dropped = render_structured_report(objective, chapters, index)
+            ctx.trace.emit(
+                "analyst_structured_ok",
+                node=NODE,
+                chapters=len(chapters),
+                declared=sum(len(c.cite_ids) for c in chapters),
+                dropped_ids=dropped,
+            )
+            if dropped:
+                # 声明了但索引里不存在的编号——疑似臆造，拼装层已拦下，必须留痕
+                log.warning(f"[analyst] 结构化输出声明了未注册编号，已丢弃：{dropped}")
+            resp = replace(resp, text=rendered)
+        else:
+            ctx.trace.emit(
+                "analyst_structured_fallback",
+                node=NODE,
+                reason="输出不含有效 <<CHAPTER>> 块，退回纯文本路径",
+            )
+            log.warning("[analyst] 结构化输出解析失败（无有效章节块），按纯文本处理")
 
     # ---- T8.6 零引用纠偏：一次、有界、可留痕 ----
     # 触发条件必须同时满足两条：① 有可用证据（否则"没有引用"是正常的）；

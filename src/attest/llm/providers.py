@@ -26,7 +26,15 @@ from ..retrieval.citations import (
     parse_pairs_block,
 )
 from ..trace.events import estimate_tokens
-from .prompts import parse_objective, parse_outline, parse_rewrite_target, parse_subqs
+from .prompts import (
+    CHAPTER_BEGIN,
+    CITE_BEGIN,
+    TEXT_BEGIN,
+    parse_objective,
+    parse_outline,
+    parse_rewrite_target,
+    parse_subqs,
+)
 
 log = get_logger(__name__)
 
@@ -108,7 +116,16 @@ class MockProvider:
     ) -> ProviderResult:
         user = _last_user(messages)
         handler = getattr(self, f"_t_{task}", None)
-        text = handler(user) if handler is not None else self._t_generic(user)
+        # T9.1：analyst 的结构化协议由 system 提示词激活（含 <<CHAPTER>> 契约）——
+        # mock 必须按同一信号切换输出形态，否则离线链路（默认档）全部落进降级分支，
+        # 结构化路径在 CI 里零覆盖。
+        if task == "analyst" and any(
+            m.get("role") == "system" and CHAPTER_BEGIN in m.get("content", "")
+            for m in messages
+        ):
+            text = self._t_analyst_structured(user)
+        else:
+            text = handler(user) if handler is not None else self._t_generic(user)
         prompt_text = _flatten(messages)
         return ProviderResult(
             text=text,
@@ -247,6 +264,72 @@ class MockProvider:
             lines.append("")
 
         return "\n".join(lines).rstrip() + "\n"
+
+    def _t_analyst_structured(self, user: str) -> str:
+        """T9.1 离线结构化撰稿：分章输出 <<CHAPTER>>/<<CITE>>/<<TEXT>> 块。
+
+        刻意模拟**真实弱模型的形态**：正文（TEXT）里**不挂编号**，编号只出现在
+        <<CITE>> 声明行——这样离线链路走的就是"代码注入依据行"那条主路径，
+        而不是"模型自己写编号"的幸运路径（后者在免费档实测四次都拿不到）。
+        """
+        objective = parse_objective(user) or "调研报告"
+        outlines = parse_outline(user)
+        records = _dedupe_by_url(parse_evidence_block(user))
+        if not outlines:
+            outlines = _unique(r.get("sub_question", "") for r in records) or ["调研发现"]
+
+        def _block(title: str, picked: list[dict[str, str]], snippets: list[str]) -> list[str]:
+            cite = " ".join(r["citation_id"] for r in picked)
+            body = "\n".join(snippets)
+            return [
+                CHAPTER_BEGIN,
+                f"标题：{title}",
+                CITE_BEGIN,
+                cite,
+                TEXT_BEGIN,
+                body,
+                "<<END>>",
+            ]
+
+        lines: list[str] = []
+        top = sorted(records, key=lambda r: len(r.get("content", "")), reverse=True)[:3]
+        if top:
+            lines += _block(
+                "核心摘要", top, [f"- {_snippet(r.get('content', ''), 70)}" for r in top]
+            )
+        else:
+            lines += _block("核心摘要", [], ["- （证据不足）本轮未检索到可用证据。"])
+
+        for chapter in outlines:
+            picked = _rank_for_chapter(chapter, records)[:3]
+            if not picked:
+                lines += _block(
+                    chapter, [], ["- （证据不足）未检索到与该章节直接相关的证据。"]
+                )
+                continue
+            lines += _block(
+                chapter, picked, [f"- {_snippet(r.get('content', ''), 90)}" for r in picked]
+            )
+
+        conflicts = parse_conflicts_block(user)
+        if conflicts:
+            picked_ids: list[str] = []
+            body_lines: list[str] = []
+            for c in conflicts:
+                body_lines.append(
+                    f"- **{c['topic']}**：一方口径为「{c['claim_a']}」，"
+                    f"另一方口径为「{c['claim_b']}」。两者不可并存，本报告并列呈现，不做调和。"
+                )
+                for cid in (c["id_a"], c["id_b"]):
+                    if cid not in picked_ids:
+                        picked_ids.append(cid)
+            lines += _block(
+                "争议与分歧",
+                [{"citation_id": cid} for cid in picked_ids],
+                body_lines,
+            )
+
+        return "\n".join(lines) + "\n"
 
     def _t_analyst_rewrite(self, user: str) -> str:
         """T4.2b 离线章节重写：只回抄**本节所引证据**的片段（带编号）。

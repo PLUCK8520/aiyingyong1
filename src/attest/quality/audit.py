@@ -23,6 +23,7 @@ import re
 from typing import Iterable, Sequence
 
 from ..logging import get_logger
+from ..retrieval.citations import parse_basis_line
 from ..retrieval.hybrid import tokenize
 from ..schemas import AuditItem, AuditVerdict
 
@@ -183,14 +184,31 @@ def extract_claims_sectioned(
 
     同样**不过滤未知编号**（理由见 `extract_claims` 的 docstring）——这是审计器
     `citation_auditor` 实际调用的入口，过滤掉的话幻觉编号就彻底没人管了。
+
+    **T9.1 章节级依据行的两条规则**（与 `retrieval.citations.SECTION_BASIS_MARK` 契约配套）：
+      1. 依据行本身**不当 claim**：它是"本章论述依据这些来源"的元信息，不是事实性结论，
+         拿它去核对证据必判 unsupported，会被降级器剥掉编号——恰好杀死它要保护的引用；
+      2. 但本章内**无编号的句子**会关联到本章声明的编号集合**逐句受审**——
+         弱模型给不出句级编号（2026-09-13 实测四次整篇零编号），章节级声明是它
+         能服从的替代；判定走"该句所引来源的并集"，与多源句子同口径，
+         凭空数值 / 凭空要素照样被 `verify_claim` 硬否决。
     """
     out: list[tuple[str, str, str]] = []
     for title, body in iter_sections(report):
+        sents: list[str] = []
+        basis_ids: list[str] = []
         for raw in _CLAIM_SPLIT_RE.split(body):
             sent = (raw or "").strip().lstrip("-*# ").strip()
             if not sent:
                 continue
-            for cid in dict.fromkeys(_CITE_RE.findall(sent)):
+            ids_in_basis = parse_basis_line(sent)
+            if ids_in_basis is not None:
+                basis_ids = ids_in_basis
+                continue  # 规则 1：依据行是元信息，不送审
+            sents.append(sent)
+        for sent in sents:
+            own = list(dict.fromkeys(_CITE_RE.findall(sent)))
+            for cid in (own if own else basis_ids):  # 规则 2：无编号句关联章节声明
                 out.append((sent, cid, title))
     return out
 
