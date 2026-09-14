@@ -59,36 +59,67 @@ def _int(m: re.Match | None, g: int) -> int | None:
 
 
 def run_one(mode: str, struct_val: str, round_i: int, topic: str, timeout: int) -> dict:
-    thread = f"ab-t91-{mode}-{round_i}"
-    env = dict(os.environ)
-    env["ATTEST_ANALYST_STRUCTURED"] = struct_val
-    t0 = datetime.datetime.now()
-    try:
-        r = subprocess.run(
-            [str(VENV), str(CHAT), "--thread", thread, topic],
-            cwd=str(REPO), env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return {"mode": mode, "round": round_i, "topic": topic, "failed": True, "reason": "超时"}
-    except Exception as e:  # noqa: BLE001
-        return {"mode": mode, "round": round_i, "topic": topic, "failed": True, "reason": f"{type(e).__name__}: {e}"}
-    dur = (datetime.datetime.now() - t0).total_seconds()
-    out = (r.stdout or "") + "\n" + (r.stderr or "")
+    """跑一轮；失败（超时/异常/rc!=0）自动**换 thread 重试一次**——免费档偶发，
+    一次重试能显著降误判；两次都失败才记 failed，并把 stderr 报错留痕。"""
+    LOG_DIR = REPO / "data" / "eval-logs"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _attempt(attempt: int) -> tuple[dict, str, str]:
+        thread = f"ab-t91-{mode}-{round_i}" if attempt == 0 else f"ab-t91-{mode}-{round_i}-r1"
+        env = dict(os.environ)
+        env["ATTEST_ANALYST_STRUCTURED"] = struct_val
+        t0 = datetime.datetime.now()
+        try:
+            r = subprocess.run(
+                [str(VENV), str(CHAT), "--thread", thread, topic],
+                cwd=str(REPO), env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return ({"mode": mode, "round": round_i, "topic": topic, "failed": True,
+                     "reason": "超时", "attempt": attempt}, "", "")
+        except Exception as e:  # noqa: BLE001
+            return ({"mode": mode, "round": round_i, "topic": topic, "failed": True,
+                     "reason": f"{type(e).__name__}: {e}", "attempt": attempt}, "", "")
+        dur = (datetime.datetime.now() - t0).total_seconds()
+        stdout = r.stdout or ""
+        stderr = r.stderr or ""
+        # 每轮 stdout+stderr 落盘，失败可追溯（零造假：不许把失败轮的报错丢掉）
+        try:
+            (LOG_DIR / f"ab-t91-{mode}-{round_i}-a{attempt}.log").write_text(
+                f"=== STDOUT ===\n{stdout}\n=== STDERR ===\n{stderr}", encoding="utf-8"
+            )
+        except OSError:
+            pass
+        if r.returncode != 0:
+            m = re.search(r"\[运行失败\]\s*(.+)", stderr)
+            reason = m.group(1).strip()[:300] if m else f"rc={r.returncode}（stderr 尾部见 log）"
+            return ({"mode": mode, "round": round_i, "topic": topic, "failed": True,
+                     "reason": reason, "attempt": attempt, "dur_s": round(dur, 1)}, stdout, stderr)
+        return (_parse(stdout, stderr, mode, round_i, topic, dur), stdout, stderr)
+
+    row, stdout, stderr = _attempt(0)
+    if row["failed"]:
+        row2, _, _ = _attempt(1)
+        if not row2["failed"]:
+            row2["retried"] = True
+            return row2
+        row["reason"] = (row.get("reason") or "") + "（重试仍失败：" + (row2.get("reason") or "?") + "）"
+    return row
+
+
+def _parse(stdout: str, stderr: str, mode: str, round_i: int, topic: str, dur: float) -> dict:
+    out = (stdout or "") + "\n" + (stderr or "")
     saved = _RE_SAVED.search(out)
     report_path = saved.group(1).strip() if saved else ""
     report_text = ""
     if report_path and Path(report_path).exists():
         report_text = Path(report_path).read_text(encoding="utf-8", errors="replace")
-
     ref = _RE_REF.search(out)
     audit = _RE_AUDIT.search(out)
     return {
         "mode": mode, "round": round_i, "topic": topic,
-        "failed": r.returncode != 0,
-        "rc": r.returncode,
-        "dur_s": round(dur, 1),
+        "failed": False, "rc": 0, "dur_s": round(dur, 1),
         "calls": _int(_RE_CALLS.search(out), 1),
         "referenced": _int(ref, 1),
         "unresolved": _int(ref, 2),
