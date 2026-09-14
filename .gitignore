@@ -63,3 +63,6 @@ Thumbs.db
 data/commit-msg.txt
 # 环境变量备份（含本机 PATH，别进仓库）
 data/path-backup-*.txt
+# data/ 下的日志输出（曾误提交过一次：data/t.log —— T7.9c 那次被 git add -A 带进去的
+# pytest 进度输出。放这里挡住所有同类临时输出）
+data/*.log
