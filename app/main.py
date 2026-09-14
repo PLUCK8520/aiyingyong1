@@ -13,6 +13,17 @@
     GET  /api/report/{thread_id}   取报告正文 + 引用索引（T6.5 双栏数据源）
     GET  /api/trace/{thread_id}    取本次运行的事件摘要（审计视图）
 
+    ---- T8.1 知识库（2026-09-13 新增）----
+    GET    /api/kb                 知识库全貌：文档清单 + 统计
+    POST   /api/kb/upload          上传一个文档入库（原始字节 body + X-Filename 头）
+    DELETE /api/kb/{name}          从知识库摘除一个文档
+    POST   /api/kb/rebuild         丢弃持久索引，下次检索全量重建
+
+    ⚠️ 知识库路由只做**协议适配**（收字节 / 返 JSON / 映射错误码），
+    业务判断全部在 `attest.kb` 里；且一律走 `asyncio.to_thread`——
+    分块与 embedding 是 CPU/IO 密集，直接跑在协程里会阻塞事件循环，
+    表现为"打开知识库时，正在跑的调研卡住不动"。
+
 ⚠️ **为什么必须有 `/api/confirm`**（任务清单 T6.1 只写了 4 个端点）：
     P5 确定的 T5.4 语义是**编译期静态断点**，续跑必须
     `update_state(plan_approval)` + `invoke(None)`（`Command(resume=...)` 在静态断点下无处投递）。
@@ -33,6 +44,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
+from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +52,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from attest.config import load_settings
+from attest.kb import (
+    MAX_UPLOAD_BYTES,
+    describe as kb_describe,
+    ingest_document,
+    rebuild_index,
+    remove_document,
+)
 from attest.logging import get_logger, setup_logging
 
 from .session import Session, SessionManager, stream_events
@@ -120,12 +139,26 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     # 开发期跨域：Vite dev server (5173) → API (8000)。生产由 Vite 打包后同源托管，无需 CORS。
+    #
+    # ⚠️ 为什么还要 `allow_origin_regex` 放行局域网段（2026-09-13 加）：
+    #    默认走 Vite 代理（proxy → 127.0.0.1:8000），浏览器看到的是**同源**请求，
+    #    本来不触发 CORS。但只要有人把 `VITE_API_BASE` 直接指向后端的内网地址
+    #    （例如 `http://192.168.1.7:8000`），来源就变成 `http://192.168.1.7:5173`，
+    #    不在白名单里 → 浏览器拦掉全部请求，且报错信息与"后端挂了"长得一样，很难查。
+    #    这里放行 RFC1918 三段私有地址，只解决"局域网演示"这一个场景。
+    #    公网部署**不应**沿用这条规则——那时要把白名单收敛成具体域名。
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             "http://localhost:5173", "http://127.0.0.1:5173",
             "http://localhost:8000", "http://127.0.0.1:8000",
         ],
+        allow_origin_regex=(
+            r"http://(?:localhost|127\.0\.0\.1"
+            r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+            r"|192\.168\.\d{1,3}\.\d{1,3}"
+            r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d+)?"
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -331,6 +364,84 @@ def _register_routes(app: FastAPI) -> None:
             "events": events,
             "timeline": _timeline(events),
         }
+
+    # ---------------------------------------------------------- 知识库（T8.1）
+    @app.get("/api/kb")
+    async def kb_overview(request: Request) -> dict[str, Any]:
+        """知识库全貌：文档清单（含每个文件的 chunk 数）+ 统计。
+
+        ⚠️ 一律 `asyncio.to_thread`：这里要全量分块（PDF 还要解压解析），
+        属 CPU/IO 密集。直接在协程里 await 会**阻塞整个事件循环**——
+        用户打开知识库时，正在跑的调研会整段停住，且日志里看不出原因。
+        """
+        mgr = _mgr(request)
+        data = await asyncio.to_thread(kb_describe, mgr.settings)
+        return {"ok": True, **data}
+
+    @app.post("/api/kb/upload")
+    async def kb_upload(request: Request) -> dict[str, Any]:
+        """上传一个文档入库（md / txt / pdf）。
+
+        ⚠️ **为什么不用 `multipart/form-data` + `UploadFile`**（标准做法但这里不用）：
+        那需要额外安装 `python-multipart`，而本项目坚持"直接依赖最小"
+        （`requirements.txt` 只有 9 项，全部经过 P-1 环境预检）。为一次文件上传
+        引入新依赖不划算。改用 **原始字节 body + `X-Filename` 头**——
+        文件名按 RFC 3986 做 URL 编码，否则中文/空格/引号在 HTTP 头里会被截断或乱码。
+        """
+        mgr = _mgr(request)
+        raw_name = request.headers.get("x-filename", "")
+        filename = unquote(raw_name) if raw_name else ""
+        if not filename:
+            raise HTTPException(
+                status_code=422,
+                detail="缺少 X-Filename 头（文件名需 URL 编码后放在该请求头里）",
+            )
+
+        data = await request.body()
+        # 早失败：超限直接 413，不用等落盘后才发现（kb 层还会再校验一次，纵深防御）
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件过大：{len(data) / 1048576:.1f}MB，上限 {MAX_UPLOAD_BYTES // 1048576}MB",
+            )
+
+        try:
+            result = await asyncio.to_thread(ingest_document, mgr.settings, filename, data)
+        except ValueError as exc:
+            # ValueError 是 kb 层定义的"用户可修正"错误（格式/大小/解析失败），文案已是中文
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"ok": True, **result}
+
+    @app.delete("/api/kb/{name:path}")
+    async def kb_delete(request: Request, name: str) -> dict[str, Any]:
+        """从知识库摘除一个文档（删文件 + 同步向量索引 + 失效检索缓存）。
+
+        `{name:path}` 而不是 `{name}`：文件名可能含子目录分隔或特殊字符，
+        前端会 `encodeURIComponent`；用 `:path` 才不会被路径匹配规则提前拒绝。
+        真正的安全收敛在 `kb.safe_filename()`（只取最后一段 + 剔除危险字符）。
+        """
+        mgr = _mgr(request)
+        try:
+            result = await asyncio.to_thread(remove_document, mgr.settings, name)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"ok": True, **result}
+
+    @app.post("/api/kb/rebuild")
+    async def kb_rebuild(request: Request) -> dict[str, Any]:
+        """丢弃持久索引 + 失效缓存，让下次检索从文档目录全量重建。
+
+        换 embedding 模型后必须做这个（`ChromaVectorStore` 会因 embedder/dim
+        不匹配直接拒绝服务，这是 NFR-11 的设计）。
+        """
+        mgr = _mgr(request)
+        try:
+            result = await asyncio.to_thread(rebuild_index, mgr.settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"ok": True, **result}
 
     @app.get("/api/health")
     async def health(request: Request) -> dict[str, Any]:

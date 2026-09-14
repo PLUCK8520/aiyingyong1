@@ -17,7 +17,7 @@ interface Props {
 
 export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props) {
   return (
-    <aside className="panel flex h-full w-[280px] shrink-0 flex-col overflow-hidden">
+    <aside className="panel no-print flex h-full w-[280px] shrink-0 flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h1 className="text-sm font-medium text-fg">Attest 质证</h1>

@@ -25,8 +25,22 @@ import { ProgressStream } from "./ProgressStream";
 import { TimelinePanel } from "./TimelinePanel";
 import { ReportView } from "./ReportView";
 import { ConfirmModal, type ConfirmPayload } from "./ConfirmModal";
+import { KBView } from "./KBView";
 
-type Tab = "progress" | "report";
+type Tab = "progress" | "report" | "kb";
+
+/**
+ * Tab 显示名。
+ *
+ * 用查表而不是 `t === "progress" ? "进度" : "报告"`：加到第三个 tab 时，
+ * 嵌套三元就会开始难读、且新增成员不会报错（TS 不会告诉你漏了分支）——
+ * `Record<Tab, string>` 会在漏键时直接编译失败。
+ */
+const TAB_LABEL: Record<Tab, string> = {
+  progress: "进度",
+  report: "报告",
+  kb: "知识库",
+};
 
 export default function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -321,7 +335,7 @@ export default function App() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col gap-3">
-        <header className="panel flex items-center justify-between gap-4 px-4 py-3">
+        <header className="panel no-print flex items-center justify-between gap-4 px-4 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-medium text-fg">
               {activeSession?.query || "新会话"}
@@ -341,7 +355,7 @@ export default function App() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border p-0.5">
-            {(["progress", "report"] as Tab[]).map((t) => (
+            {(["progress", "report", "kb"] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -350,7 +364,7 @@ export default function App() {
                   tab === t ? "bg-muted text-fg" : "text-fg-muted hover:text-fg"
                 }`}
               >
-                {t === "progress" ? "进度" : "报告"}
+                {TAB_LABEL[t]}
               </button>
             ))}
           </div>
@@ -359,7 +373,7 @@ export default function App() {
         {error && (
           <div
             role="alert"
-            className="panel flex items-start gap-2.5 border-danger/40 bg-danger/10 px-4 py-2.5"
+            className="panel no-print flex items-start gap-2.5 border-danger/40 bg-danger/10 px-4 py-2.5"
           >
             <span className="mt-1.5 dot bg-danger" aria-hidden="true" />
             <p className="flex-1 text-[12.5px] leading-relaxed text-fg">{error}</p>
@@ -374,7 +388,11 @@ export default function App() {
         )}
 
         <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {tab === "progress" ? (
+          {tab === "kb" ? (
+            /* 知识库与会话无关（是全局语料池），所以放在最前面判定——
+               否则"没有活跃会话"时会掉进最后那个"还没有可查看的报告"空态。 */
+            <KBView />
+          ) : tab === "progress" ? (
             <ProgressStream
               timeline={timeline}
               running={running}
@@ -398,7 +416,7 @@ export default function App() {
           )}
         </div>
 
-        <div className="panel flex items-end gap-2 p-3">
+        <div className="panel no-print flex items-end gap-2 p-3">
           <div className="min-w-0 flex-1">
             <label htmlFor="q" className="sr-only">
               调研问题
@@ -430,7 +448,7 @@ export default function App() {
         </div>
       </main>
 
-      <div className="hidden w-[320px] shrink-0 xl:block">
+      <div className="no-print hidden w-[320px] shrink-0 xl:block">
         <TimelinePanel timeline={timeline} cost={cost} tokens={tokens} running={running} />
       </div>
 

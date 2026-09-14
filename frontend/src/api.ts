@@ -202,6 +202,70 @@ export interface TimelineRow {
   outputs?: string[];
 }
 
+// ============================================================ 知识库（T8.1）
+
+/** 知识库里的一份文档（`GET /api/kb`）。 */
+export interface KBDocument {
+  /** 相对知识库根目录的路径，也是删除时的标识 */
+  name: string;
+  title: string;
+  /** 字节数 */
+  size: number;
+  /** 该文档切出的 chunk 数（= 检索层实际索引的条数，由后端同一个分块函数算出） */
+  chunks: number;
+  /** 文件修改时间（秒级 Unix 时间戳） */
+  modified: number;
+  /** 仓库自带的示例语料（`local_*.md`），不是用户上传的——UI 里要标出来 */
+  sample: boolean;
+}
+
+export interface KBStats {
+  documents: number;
+  chunks: number;
+  docs_dir: string;
+  store: "numpy" | "chroma";
+  /** 当前配置的 embedding 模型名（mock 档为 mock-hashing） */
+  embedder: string;
+  /**
+   * 无可用 embedding 时的兜底策略。
+   * `hashing` = 退回离线散列向量（**词法级**相似度，不是语义）——
+   * 这会让本地检索的召回质量明显下降，UI 必须如实提示，不能粉饰。
+   */
+  embed_fallback: "none" | "hashing";
+  chunk_chars: number;
+  chunk_overlap: number;
+  local_enabled: boolean;
+  search_mode: "mock" | "tavily";
+  /** 网络检索是否真的可用（tavily 模式 + 有 key）。false 时本地库是**唯一**证据来源 */
+  web_search_ready: boolean;
+  llm_mode: string;
+}
+
+export interface KBOverview {
+  documents: KBDocument[];
+  stats: KBStats;
+}
+
+export interface KBUploadResult {
+  ok: boolean;
+  name: string;
+  size: number;
+  chunks: number;
+  /** 同名文档被覆盖（而不是新增） */
+  replaced: boolean;
+  /** 写入持久索引的条数（numpy 档恒为 0——索引不持久化，检索时从磁盘重建） */
+  store_synced: number;
+  stats: KBStats;
+}
+
+export interface KBDeleteResult {
+  ok: boolean;
+  name: string;
+  removed_chunks: number;
+  store_unlinked: number;
+  stats: KBStats;
+}
+
 // ============================================================ 客户端
 
 /**
@@ -229,13 +293,15 @@ export class ApiError extends Error {
   }
 }
 
-async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
-    ...init,
-  });
+/**
+ * 发请求并统一抛 `ApiError`（把后端 `detail` 文案提出来给人看）。
+ *
+ * ⚠️ 与 `jsonFetch` 的分工：这个**不设 Content-Type**——文件上传要把 `File` 直接当 body，
+ * 由浏览器自己带类型；硬塞 `application/json` 会让声明与实际内容不符。
+ */
+async function rawFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
-    // 后端错误体是 FastAPI 的 {detail: string}，把 detail 提出来给人看
     let detail = `HTTP ${res.status}`;
     try {
       const body = (await res.json()) as { detail?: unknown };
@@ -246,6 +312,20 @@ async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(detail, res.status);
   }
   return (await res.json()) as T;
+}
+
+/**
+ * JSON 请求。
+ *
+ * ⚠️ `...init` 必须放在 `headers` **之前**：反过来写的话，调用方一旦传了 `headers`，
+ * 就会把这里拼好的 `Content-Type` 整个覆盖掉（对象展开是键级覆盖、不是合并）。
+ * 2026-09-13 做上传功能时顺手修掉了这个隐患——此前所有调用方都不传 headers，所以它一直没暴露。
+ */
+async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return rawFetch<T>(path, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
 }
 
 export const api = {
@@ -287,6 +367,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ session_id: threadId, action, plan }),
     }),
+
+  // ---------------------------------------------------------- 知识库（T8.1）
+  kbOverview: () => rawFetch<{ ok: boolean } & KBOverview>("/api/kb"),
+
+  kbUpload: (file: File) =>
+    rawFetch<KBUploadResult>("/api/kb/upload", {
+      method: "POST",
+      // 文件名按 RFC 3986 编码后放进自定义头，后端 `unquote` 还原。
+      // 为什么不走 multipart：见 `app/main.py::kb_upload` 的文档串（避免引入 python-multipart）。
+      headers: { "X-Filename": encodeURIComponent(file.name) },
+      body: file,
+    }),
+
+  kbDelete: (name: string) =>
+    rawFetch<KBDeleteResult>(`/api/kb/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  kbRebuild: () =>
+    rawFetch<{ ok: boolean; rebuilt: boolean; removed_index: boolean; store: string }>(
+      "/api/kb/rebuild",
+      { method: "POST" },
+    ),
 };
 
 // ============================================================ SSE

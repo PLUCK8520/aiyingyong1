@@ -33,6 +33,13 @@ data/chroma_smoke/
 chroma/
 chroma_db/
 
+# ---- 知识库上传目录（T8.1）----
+# ⚠️ 上传的文档与仓库自带的示例语料**同目录**（`local_docs_dir` 默认指向 fixtures/local）。
+# 只放行 `local_*.md` 这 7 个示例，其余一律不跟踪：否则用户上传的私密资料
+# 会在下一次 `git add -A` 时被提交并推到 GitHub —— 这是功能自身引入的泄露通道。
+data/fixtures/local/*
+!data/fixtures/local/local_*.md
+
 # ---- Trace / 评测产物（每次运行都会变，不入库）----
 trace.jsonl
 *.jsonl.tmp

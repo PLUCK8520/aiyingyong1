@@ -7,6 +7,7 @@
  */
 
 import { fmtDuration, nodeLabel, type TimelineRow } from "./api";
+import { fmtElapsed, useNow } from "./useNow";
 
 interface Props {
   timeline: TimelineRow[];
@@ -15,6 +16,9 @@ interface Props {
 }
 
 export function ProgressStream({ timeline, running, phase }: Props) {
+  // ⚠️ hooks 必须在任何 early return **之前**调用（下面有一个提前返回的空态分支）
+  const now = useNow(running);
+
   if (timeline.length === 0 && !running) {
     return (
       <div className="panel flex flex-1 flex-col items-center justify-center p-8 text-center">
@@ -50,6 +54,9 @@ export function ProgressStream({ timeline, running, phase }: Props) {
         <ol className="space-y-0.5">
           {timeline.map((row) => {
             const open = row.duration_ms === null;
+            // open 有两种成因：真的在跑 / 异常中断留下的未闭合行。只有会话在运行时
+            // 才能断定是前者——否则计时会一直涨，看着像永远跑不完。
+            const live = open && running;
             return (
               <li
                 key={row.index}
@@ -62,8 +69,16 @@ export function ProgressStream({ timeline, running, phase }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[13px] text-fg">{nodeLabel(row.node)}</span>
-                    <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-                      {open ? "进行中…" : fmtDuration(row.duration_ms)}
+                    <span
+                      className={`shrink-0 font-mono text-[11px] ${
+                        live ? "text-info" : "text-fg-muted"
+                      }`}
+                    >
+                      {live
+                        ? `已运行 ${fmtElapsed(now - row.start)}`
+                        : open
+                          ? "未正常结束"
+                          : fmtDuration(row.duration_ms)}
                     </span>
                   </div>
                   {row.brief && (

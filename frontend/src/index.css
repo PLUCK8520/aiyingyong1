@@ -112,3 +112,83 @@
     @apply my-4 border-border;
   }
 }
+
+/**
+ * T8.2 · 打印样式（浏览器打印 / 另存为 PDF）。
+ *
+ * ⚠️ 为什么必须有（这不是锦上添花，少一条就会印出废纸）：
+ *   ① 本项目是**暗色主题**，正文色接近白色。不覆盖的话，输出是白纸上的浅灰字，几乎看不见；
+ *   ② 界面上大量使用 `flex + overflow-hidden + overflow-y-auto` 的滚动容器。
+ *      打印时浏览器只输出**当前可见的那一屏**，报告后面几页直接消失——**且不报任何错**，
+ *      是浏览器打印最经典的坑；
+ *   ③ 会话侧栏、执行时间线、输入框这些控件不该出现在要交出去的纸质稿里。
+ *
+ * 隐藏控件靠 `.no-print`（在组件上显式标注），而不是靠选择器猜结构——
+ * 报告页的引用清单**也是** `aside`，一刀切隐藏会把引用来源一起删掉。
+ */
+@media print {
+  /* ①② 先解除高度与滚动约束，让内容自然铺开。
+     `!important` 是必需的：要盖住 Tailwind 的 `overflow-hidden` / `flex-1` 工具类。 */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  * {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  /* `flex-1` 的基准尺寸是 0——不改成 `flex: none`，它在"容器高度 auto"时可能塌成 0 高 */
+  [class*="flex-1"] {
+    flex: none !important;
+  }
+
+  /* ③ 隐藏交互控件 */
+  .no-print {
+    display: none !important;
+  }
+  /* 引用清单要**反向**放出来：它平时是 `hidden xl:flex`（窄屏折叠），
+     而打印的页面宽度必然落在窄屏分支。不放出来的话，正文里那些
+     `[LOC1-1-1]` 编号就成了无处可查的悬空标记。 */
+  .print-show {
+    display: block !important;
+  }
+
+  /* ① 反转成亮色：白底黑字 */
+  body {
+    background: #fff !important;
+  }
+  body,
+  .report-body,
+  .report-body * {
+    color: #111 !important;
+  }
+  .panel {
+    border: none !important;
+    border-radius: 0 !important;
+  }
+  .report-body h1,
+  .report-body h2,
+  .report-body h3 {
+    color: #000 !important;
+  }
+  .report-body a {
+    color: #0645ad !important;
+    text-decoration: underline !important;
+  }
+  .report-body code,
+  .report-body pre {
+    background: #f3f3f3 !important;
+    color: #222 !important;
+    border: 1px solid #e4e4e4 !important;
+  }
+  .report-body th,
+  .report-body td {
+    border: 1px solid #ccc !important;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}

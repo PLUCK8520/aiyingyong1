@@ -43,6 +43,7 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
       }`}
     >
       <section className="panel flex min-h-0 flex-col overflow-hidden">
+        <ExportBar markdown={markdown} />
         {refused && sufficiency && <RefusalBanner info={sufficiency} />}
         <div className="report-body min-h-0 flex-1 overflow-y-auto p-5">
           {blocks.map((b, i) => (
@@ -52,7 +53,7 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
       </section>
 
       {!refused && (
-        <aside className="panel hidden min-h-0 flex-col overflow-hidden xl:flex">
+        <aside className="panel print-show hidden min-h-0 flex-col overflow-hidden xl:flex">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-medium text-fg">引用来源</h2>
             <p className="mt-0.5 text-[11px] text-fg-muted">{refEntries.length} 条证据</p>
@@ -103,6 +104,119 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
           </div>
         </aside>
       )}
+    </div>
+  );
+}
+
+// ============================================================ 导出（T8.2）
+
+/**
+ * 从报告正文里推断一个像样的文件名。
+ *
+ * 取正文第一个 H1 当标题——**不要用 thread_id**：用户下载下来是想归档或交出去，
+ * `web-1789286556753.md` 这种名字对人是噪音。标题里的非法字符要替换掉，
+ * 否则 Windows 上会保存失败（且各浏览器报错方式不一致，很难查）。
+ */
+function reportFileName(md: string): string {
+  const m = /^#\s+(.+)$/m.exec(md);
+  const base = (m?.[1] ?? "调研报告")
+    .trim()
+    .replace(/[\\/:*?"<>|\s]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  const d = new Date();
+  const p = (v: number) => String(v).padStart(2, "0");
+  return `${base || "调研报告"}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(
+    d.getHours(),
+  )}${p(d.getMinutes())}.md`;
+}
+
+/**
+ * 复制文本到剪贴板（带非安全上下文的回退）。
+ *
+ * ⚠️ **为什么不能直接用 `navigator.clipboard`**：它在**安全上下文**才存在
+ * （https 或 localhost）。局域网演示时页面是 `http://192.168.x.x:5173`——
+ * 不是安全上下文，`navigator.clipboard` 直接是 `undefined`，
+ * 调用会抛 TypeError，"复制"按钮在演示现场静默失灵，而开发机上一切正常。
+ * 这条分支就是为那个场景写的。
+ */
+async function copyText(text: string): Promise<void> {
+  if (window.isSecureContext && navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "-9999px";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } finally {
+    document.body.removeChild(ta);
+  }
+  if (!ok) throw new Error("浏览器拒绝了复制操作，请手动全选复制");
+}
+
+/**
+ * 报告导出的操作条。
+ *
+ * 三种导出方式，覆盖不同用途：
+ *   - **复制**：贴进飞书/Notion/聊天窗口，最常用；
+ *   - **下载 .md**：归档、进 Git、二次编辑（后端 `export_report` 落盘的也是 md）；
+ *   - **打印**：需要 PDF 时的现实解法。T7.7 已经决策过——中文 PDF 要内嵌 CJK 字体，
+ *     与"依赖最小"冲突，所以交给浏览器打印（打印样式见 `index.css` 的 `@media print`）。
+ */
+function ExportBar({ markdown }: { markdown: string }) {
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onCopy = async () => {
+    try {
+      await copyText(markdown);
+      setErr(null);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  const onDownload = () => {
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = reportFileName(markdown);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 立刻 revoke 在部分浏览器上会打断下载；下一个宏任务再回收
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  return (
+    <div className="no-print flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
+      <span className="mr-auto text-[11px] text-fg-muted">导出</span>
+      {err && <span className="mr-1 text-[11px] text-danger">{err}</span>}
+      <button type="button" className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={() => void onCopy()}>
+        {copied ? "已复制" : "复制正文"}
+      </button>
+      <button type="button" className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={onDownload}>
+        下载 .md
+      </button>
+      <button
+        type="button"
+        className="btn-ghost !px-2 !py-1 !text-[11px]"
+        onClick={() => window.print()}
+        title="用浏览器打印（可选另存为 PDF）"
+      >
+        打印
+      </button>
     </div>
   );
 }

@@ -9,6 +9,7 @@
  */
 
 import { fmtCny, fmtDuration, fmtTokens, nodeLabel, type TimelineRow } from "./api";
+import { fmtElapsed, useNow } from "./useNow";
 
 const WARN_RATIO = 0.7;
 const HARD_RATIO = 0.9;
@@ -22,6 +23,8 @@ interface Props {
 }
 
 export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
+  // 运行中每秒滴答一次，用于"已运行 N 秒"（见 useNow 的说明）
+  const now = useNow(running);
   const ratio = Math.min(cost / BUDGET_CNY, 1);
   const level = ratio >= HARD_RATIO ? 2 : ratio >= WARN_RATIO ? 1 : 0;
   const barColor = level === 2 ? "bg-danger" : level === 1 ? "bg-warn" : "bg-accent";
@@ -88,6 +91,9 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
             <ul className="space-y-0.5">
               {timeline.map((row) => {
                 const open = row.duration_ms === null;
+                // `open` 有两种成因：① 真的在跑；② 异常中断留下的未闭合行。
+                // 只有会话在运行时才能断定是前者——否则显示计时会一直涨，骗人。
+                const live = open && running;
                 return (
                   <li
                     key={row.index}
@@ -106,8 +112,17 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
                           {row.node}
                         </span>
                       </div>
-                      <span className="shrink-0 font-mono text-[11px] text-fg-muted">
-                        {open ? "…" : fmtDuration(row.duration_ms)}
+                      <span
+                        className={`shrink-0 font-mono text-[11px] ${
+                          live ? "text-info" : "text-fg-muted"
+                        }`}
+                        title={live ? "已运行时长（每秒刷新）" : undefined}
+                      >
+                        {live
+                          ? fmtElapsed(now - row.start)
+                          : open
+                            ? "—"
+                            : fmtDuration(row.duration_ms)}
                       </span>
                     </div>
                     {row.brief && (
