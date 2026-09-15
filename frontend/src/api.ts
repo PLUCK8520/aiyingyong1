@@ -484,16 +484,22 @@ export function nodeLabel(node: string): string {
   return NODE_LABEL[node] ?? node;
 }
 
+/**
+ * 会话状态的**唯一**展示口径（标签 + 状态点色 + 徽标类名）。
+ *
+ * ⚠️ 只此一份：`Sidebar`（状态点）与 `App`（状态徽标）都从这里取。
+ * 各自再定义一份是"双份真相"——某个状态改了文案或颜色后，两处会静默不一致。
+ */
 export const STATUS_META: Record<
   SessionStatus,
-  { label: string; color: string; pulse?: boolean }
+  { label: string; color: string; chip: string; pulse?: boolean }
 > = {
-  idle: { label: "待启动", color: "bg-fg-muted" },
-  running: { label: "运行中", color: "bg-info", pulse: true },
-  awaiting_confirm: { label: "待确认", color: "bg-warn", pulse: true },
-  done: { label: "已完成", color: "bg-accent" },
-  error: { label: "失败", color: "bg-danger" },
-  aborted: { label: "已中止", color: "bg-fg-muted" },
+  idle: { label: "待启动", color: "bg-fg-muted", chip: "chip-neutral" },
+  running: { label: "运行中", color: "bg-info", chip: "chip-info", pulse: true },
+  awaiting_confirm: { label: "待确认大纲", color: "bg-warn", chip: "chip-warn", pulse: true },
+  done: { label: "已完成", color: "bg-accent", chip: "chip-accent" },
+  error: { label: "失败", color: "bg-danger", chip: "chip-danger" },
+  aborted: { label: "已中止", color: "bg-fg-muted", chip: "chip-neutral" },
 };
 
 export function fmtCny(v: number): string {

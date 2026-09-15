@@ -17,11 +17,35 @@ interface Props {
 
 export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props) {
   return (
-    <aside className="panel no-print flex h-full w-[280px] shrink-0 flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
-          <h1 className="text-sm font-medium text-fg">Attest 质证</h1>
-          <p className="mt-0.5 text-[11px] text-fg-muted">逐句质证的调研工作台</p>
+    <aside className="panel no-print flex h-full w-[264px] shrink-0 flex-col overflow-hidden">
+      {/* 品牌头。用 accent 小方点 + 字重对比建立识别度——
+          旧版只有两行同色文字，和列表项混在一起分不出"这是标题区"。 */}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-accent-soft text-accent"
+            aria-hidden="true"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 3 4.5 6.5v5c0 4.2 3.1 7.9 7.5 9.5 4.4-1.6 7.5-5.3 7.5-9.5v-5L12 3Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path
+                d="m9 11.8 2.1 2.2L15.2 9.6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold tracking-tight text-fg">Attest 质证</h2>
+            <p className="truncate text-2xs text-fg-subtle">逐句质证的调研工作台</p>
+          </div>
         </div>
         <button
           type="button"
@@ -38,30 +62,42 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
 
       <div className="flex-1 overflow-y-auto p-2">
         {loading && sessions.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-fg-muted">加载中…</p>
+          <p className="px-3 py-6 text-center text-xs text-fg-subtle">加载中…</p>
         ) : sessions.length === 0 ? (
           <div className="px-3 py-8 text-center">
-            <p className="text-xs text-fg-muted">还没有会话</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-fg-muted/70">
+            <p className="text-xs font-medium text-fg-muted">还没有会话</p>
+            <p className="mt-1.5 text-2xs leading-relaxed text-fg-subtle">
               点右上角 + 新建，
               <br />
-              或在下方直接提问开始调研
+              或在右下输入框直接提问
             </p>
           </div>
         ) : (
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {sessions.map((s) => {
               const meta = STATUS_META[s.status];
               const active = s.thread_id === activeId;
               return (
                 <li key={s.thread_id}>
+                  {/* 选中态用"左侧 2px 色条 + 抬升底色"两个信号，
+                      而不是只换背景色——只换底色在暗色里几乎看不出来。 */}
                   <button
                     type="button"
                     onClick={() => onSelect(s.thread_id)}
-                    className={`w-full cursor-pointer rounded-lg px-3 py-2 text-left transition-colors duration-150 ${
-                      active ? "bg-muted" : "hover:bg-muted/60"
-                    }`}
+                    aria-current={active ? "true" : undefined}
+                    className={`group relative w-full cursor-pointer rounded-control py-2 pl-3.5 pr-2.5 text-left
+                                transition-colors duration-fast ${
+                                  active
+                                    ? "bg-elevated"
+                                    : "hover:bg-elevated/50"
+                                }`}
                   >
+                    {active && (
+                      <span
+                        className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent"
+                        aria-hidden="true"
+                      />
+                    )}
                     <div className="flex items-start gap-2">
                       <span
                         className={`dot mt-1.5 ${meta.color} ${
@@ -71,13 +107,17 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
                         aria-hidden="true"
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[12.5px] text-fg">
+                        <p
+                          className={`truncate text-xs leading-snug ${
+                            active ? "font-medium text-fg" : "text-fg-muted group-hover:text-fg"
+                          }`}
+                        >
                           {s.query || "（未命名会话）"}
                         </p>
-                        <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-fg-muted">
+                        <p className="mt-1 flex items-center gap-1.5 text-2xs text-fg-subtle">
                           <span>{meta.label}</span>
-                          <span className="text-fg-muted/50">·</span>
-                          <span className="font-mono text-[10px]">
+                          <span aria-hidden="true">·</span>
+                          <span className="truncate font-mono opacity-80">
                             {s.thread_id.slice(0, 12)}
                           </span>
                         </p>
@@ -91,10 +131,23 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
         )}
       </div>
 
-      <div className="border-t border-border px-4 py-2.5">
-        <p className="text-[10.5px] leading-relaxed text-fg-muted/70">
-          状态点：蓝=运行中 / 黄=待确认 / 绿=已完成 / 红=失败
-        </p>
+      {/* 底部图例：改成"点 + 文字"横排，比旧版一句话更省高度、更好扫读 */}
+      <div className="border-t border-border px-3.5 py-2.5">
+        <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-fg-subtle">
+          {(
+            [
+              ["bg-info", "运行中"],
+              ["bg-warn", "待确认"],
+              ["bg-accent", "已完成"],
+              ["bg-danger", "失败"],
+            ] as const
+          ).map(([cls, label]) => (
+            <li key={label} className="flex items-center gap-1.5">
+              <span className={`dot ${cls}`} aria-hidden="true" />
+              {label}
+            </li>
+          ))}
+        </ul>
       </div>
     </aside>
   );

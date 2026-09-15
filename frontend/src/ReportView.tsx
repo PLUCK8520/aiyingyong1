@@ -56,7 +56,7 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
         <aside className="panel print-show hidden min-h-0 flex-col overflow-hidden xl:flex">
           <div className="border-b border-border px-4 py-3">
             <h2 className="text-sm font-medium text-fg">引用来源</h2>
-            <p className="mt-0.5 text-[11px] text-fg-muted">{refEntries.length} 条证据</p>
+            <p className="mt-0.5 text-2xs text-fg-muted">{refEntries.length} 条证据</p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {refEntries.length === 0 ? (
@@ -69,14 +69,14 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
                     id={`ref-${id}`}
                     onMouseEnter={() => setActive(id)}
                     onMouseLeave={() => setActive(null)}
-                    className={`scroll-mt-2 rounded-lg border px-3 py-2 transition-colors duration-150 ${
+                    className={`scroll-mt-2 rounded-control border px-3 py-2 transition-colors duration-fast ${
                       active === id
                         ? "border-accent/50 bg-muted"
-                        : "border-transparent hover:bg-muted/50"
+                        : "border-transparent hover:bg-elevated/50"
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      <span className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                      <span className="mt-0.5 shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-2xs text-accent">
                         {id}
                       </span>
                       {ref.url ? (
@@ -84,16 +84,16 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
                           href={ref.url}
                           target="_blank"
                           rel="noreferrer noopener"
-                          className="text-[12px] leading-snug text-info underline decoration-info/40 underline-offset-2 hover:decoration-info"
+                          className="text-xs leading-snug text-info underline decoration-info/40 underline-offset-2 hover:decoration-info"
                         >
                           {ref.title || ref.url}
                         </a>
                       ) : (
-                        <span className="text-[12px] leading-snug text-fg">{ref.title}</span>
+                        <span className="text-xs leading-snug text-fg">{ref.title}</span>
                       )}
                     </div>
                     {ref.snippet && (
-                      <p className="mt-1.5 line-clamp-3 text-[11px] leading-relaxed text-fg-muted">
+                      <p className="mt-1.5 line-clamp-3 text-2xs leading-relaxed text-fg-muted">
                         {ref.snippet}
                       </p>
                     )}
@@ -201,17 +201,17 @@ function ExportBar({ markdown }: { markdown: string }) {
 
   return (
     <div className="no-print flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-      <span className="mr-auto text-[11px] text-fg-muted">导出</span>
-      {err && <span className="mr-1 text-[11px] text-danger">{err}</span>}
-      <button type="button" className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={() => void onCopy()}>
+      <span className="mr-auto text-2xs text-fg-muted">导出</span>
+      {err && <span className="mr-1 text-2xs text-danger">{err}</span>}
+      <button type="button" className="btn-ghost !px-2 !py-1 !text-2xs" onClick={() => void onCopy()}>
         {copied ? "已复制" : "复制正文"}
       </button>
-      <button type="button" className="btn-ghost !px-2 !py-1 !text-[11px]" onClick={onDownload}>
+      <button type="button" className="btn-ghost !px-2 !py-1 !text-2xs" onClick={onDownload}>
         下载 .md
       </button>
       <button
         type="button"
-        className="btn-ghost !px-2 !py-1 !text-[11px]"
+        className="btn-ghost !px-2 !py-1 !text-2xs"
         onClick={() => window.print()}
         title="用浏览器打印（可选另存为 PDF）"
       >
@@ -244,20 +244,20 @@ function RefusalBanner({ info }: { info: EvidenceSufficiency }) {
       <div className="flex items-start gap-2.5">
         <span className="dot mt-1.5 bg-warn" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <h2 className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-fg">
+          <h2 className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
             本次未产出调研结论
-            <span className="rounded bg-warn/20 px-1.5 py-0.5 text-[10px] font-normal text-warn">
+            <span className="rounded bg-warn/20 px-1.5 py-0.5 text-2xs font-normal text-warn">
               证据不足 · 系统主动拒编
             </span>
           </h2>
 
-          <p className="mt-1 text-[12px] leading-relaxed text-fg-muted">
+          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
             {info.reasons?.[0] || "本轮检索没有获得能支撑结论的相关证据。"}
             按本系统的「零造假」原则，没有证据支撑的数字与判断一律不写——所以不给结论，
             而不是用不相关的资料拼一份看着完整、实则张冠李戴的报告。
           </p>
 
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-fg-muted">
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-2xs text-fg-muted">
             <Stat label="检索条目" value={`${nEv} 条`} />
             <Stat label="通过判据" value={`${nSel} 条`} />
             <Stat label="真实命中" value={`${nGrounded} 条`} />
@@ -265,18 +265,18 @@ function RefusalBanner({ info }: { info: EvidenceSufficiency }) {
             {info.basis && <Stat label="判据" value={info.basis} />}
           </div>
 
-          <p className="mt-2 text-[11.5px] leading-relaxed text-fg-muted">
+          <p className="mt-2 text-2xs leading-relaxed text-fg-muted">
             <span className="text-fg">这不是故障</span>，而是系统在证据不足时的主动拦截。
             要拿到真正的报告：接入真实检索（配置{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-accent">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-2xs text-accent">
               TAVILY_API_KEY
             </code>{" "}
             并把{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-accent">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-2xs text-accent">
               ATTEST_SEARCH_MODE
             </code>{" "}
             设为{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-accent">
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-2xs text-accent">
               tavily
             </code>
             ）后重跑本次问题。
@@ -290,7 +290,7 @@ function RefusalBanner({ info }: { info: EvidenceSufficiency }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <span className="inline-flex items-baseline gap-1">
-      <span className="text-fg-muted/70">{label}</span>
+      <span className="text-fg-subtle">{label}</span>
       <span className="font-mono text-fg">{value}</span>
     </span>
   );
@@ -388,7 +388,7 @@ function Inline({
               onMouseLeave={() => onCite(null)}
               onFocus={() => onCite(key)}
               onBlur={() => onCite(null)}
-              className={`mx-0.5 cursor-pointer rounded px-1 font-mono text-[10.5px] align-middle transition-colors duration-150 ${
+              className={`mx-0.5 cursor-pointer rounded px-1 font-mono text-2xs align-middle transition-colors duration-fast ${
                 known
                   ? "bg-muted text-accent hover:bg-accent/20"
                   : "bg-danger/15 text-danger"
@@ -417,18 +417,18 @@ function HoverCard({
     <span
       role="tooltip"
       className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-72 -translate-x-1/2
-                 rounded-lg border border-border bg-surface p-3 opacity-0
-                 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                 rounded-control border border-border bg-surface p-3 opacity-0
+                 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100"
     >
-      <span className="block font-mono text-[10px] text-accent">{id}</span>
-      <span className="mt-1 block text-[12px] font-medium leading-snug text-fg">
+      <span className="block font-mono text-2xs text-accent">{id}</span>
+      <span className="mt-1 block text-xs font-medium leading-snug text-fg">
         {ref_.title || "（无标题）"}
       </span>
-      <span className="mt-1.5 block line-clamp-4 text-[11px] leading-relaxed text-fg-muted">
+      <span className="mt-1.5 block line-clamp-4 text-2xs leading-relaxed text-fg-muted">
         {ref_.snippet}
       </span>
       {ref_.url && (
-        <span className="mt-1.5 block truncate font-mono text-[10px] text-info">
+        <span className="mt-1.5 block truncate font-mono text-2xs text-info">
           {ref_.url}
         </span>
       )}

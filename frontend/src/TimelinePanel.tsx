@@ -35,17 +35,17 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
         <h2 className="mb-3 text-sm font-medium text-fg">成本</h2>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-[11px] text-fg-muted">累计费用</p>
-            <p className="mt-0.5 font-mono text-[15px] text-fg">{fmtCny(cost)}</p>
+            <p className="text-2xs text-fg-muted">累计费用</p>
+            <p className="mt-0.5 font-mono text-lg text-fg">{fmtCny(cost)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-fg-muted">累计 token</p>
-            <p className="mt-0.5 font-mono text-[15px] text-fg">{fmtTokens(tokens)}</p>
+            <p className="text-2xs text-fg-muted">累计 token</p>
+            <p className="mt-0.5 font-mono text-lg text-fg">{fmtTokens(tokens)}</p>
           </div>
         </div>
 
         <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between text-[11px]">
+          <div className="mb-1.5 flex items-center justify-between text-2xs">
             <span className="text-fg-muted">预算占比（¥{BUDGET_CNY.toFixed(2)}）</span>
             <span
               className={
@@ -62,12 +62,12 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
             />
           </div>
           {level === 2 && (
-            <p className="mt-2 text-[11px] leading-relaxed text-danger">
+            <p className="mt-2 text-2xs leading-relaxed text-danger">
               已触发硬熔断（≥90%），后续调用将降级到轻量模型，报告可能不完整。
             </p>
           )}
           {level === 1 && (
-            <p className="mt-2 text-[11px] leading-relaxed text-warn">
+            <p className="mt-2 text-2xs leading-relaxed text-warn">
               已超过告警线（≥70%），接近预算上限。
             </p>
           )}
@@ -77,7 +77,7 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
       <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-sm font-medium text-fg">执行时间线</h2>
-          <span className="text-[11px] text-fg-muted">
+          <span className="text-2xs text-fg-muted">
             {timeline.length} 个节点{running ? " · 进行中" : ""}
           </span>
         </div>
@@ -97,7 +97,7 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
                 return (
                   <li
                     key={row.index}
-                    className="animate-fade-up rounded-lg px-3 py-2 hover:bg-muted/50"
+                    className="animate-fade-up rounded-control px-3 py-2 hover:bg-elevated/50"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
@@ -105,15 +105,15 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
                           className={`dot ${open ? "bg-info animate-pulse-soft" : "bg-accent"}`}
                           aria-hidden="true"
                         />
-                        <span className="truncate text-[12.5px] text-fg">
+                        <span className="truncate text-xs text-fg">
                           {nodeLabel(row.node)}
                         </span>
-                        <span className="font-mono text-[10px] text-fg-muted/60">
+                        <span className="font-mono text-2xs text-fg-subtle">
                           {row.node}
                         </span>
                       </div>
                       <span
-                        className={`shrink-0 font-mono text-[11px] ${
+                        className={`shrink-0 font-mono text-2xs ${
                           live ? "text-info" : "text-fg-muted"
                         }`}
                         title={live ? "已运行时长（每秒刷新）" : undefined}
@@ -126,12 +126,12 @@ export function TimelinePanel({ timeline, cost, tokens, running }: Props) {
                       </span>
                     </div>
                     {row.brief && (
-                      <p className="mt-0.5 truncate pl-4 text-[11px] text-fg-muted">
+                      <p className="mt-0.5 truncate pl-4 text-2xs text-fg-muted">
                         {row.brief}
                       </p>
                     )}
                     {row.outputs && row.outputs.length > 0 && (
-                      <p className="mt-0.5 truncate pl-4 font-mono text-[10px] text-fg-muted/60">
+                      <p className="mt-0.5 truncate pl-4 font-mono text-2xs text-fg-subtle">
                         → {row.outputs.join(", ")}
                       </p>
                     )}

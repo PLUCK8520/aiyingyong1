@@ -1,3 +1,7 @@
+/* 自托管字体（T9.2）——必须在 @tailwind 之前：CSS 规范要求 @import 位于文件顶部。
+   由 scripts/fetch_fonts.py 生成，理由（消除外网依赖 / 局域网演示 / 首屏稳定）见该文件头注释。 */
+@import "./fonts.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -17,99 +21,226 @@
     @apply bg-bg text-fg font-sans antialiased;
     font-size: 14px;
     line-height: 1.6;
+    /* 暗色下细字容易"发糊"，这两个属性让字形边缘更干净（Windows 上尤其明显） */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
+  /* 选中态：默认的蓝底在有语义色的界面里很跳，改用 accent 低饱和 */
+  ::selection {
+    @apply bg-accent/25 text-fg;
+  }
+
+  /* 焦点环：只对键盘用户可见（:focus-visible），且用 accent 的柔化版本，
+     避免满屏"绿色描边"；`ring-offset-bg` 让描边与背景之间留一道缝，更易辨认。 */
   :focus-visible {
-    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg;
+    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-bg;
   }
 
+  /* 滚动条：8px（旧版 10px 偏粗），轨道透明，滑块默认低对比、hover 才显形——
+     滚动条在内容区长期可见，颜色过重会一直抢注意力。 */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-border rounded-full;
+    @apply rounded-full bg-border-strong/70;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-fg-muted;
+    @apply bg-fg-subtle;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* 尊重系统的"减少动态效果"设置（无障碍硬要求，不是可选项） */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer components {
+  /* ---------------------------------------------------------------- 容器 */
+
+  /**
+   * `.panel`：内容面板。用 shadow-card（含 inset 高光）而不是纯 border 来勾边——
+   * 暗色界面里"内描边高光"是让卡片立起来的关键，单靠边框会显得平。
+   */
   .panel {
-    @apply bg-surface border border-border rounded-xl;
+    @apply rounded-card border border-border bg-surface shadow-card;
+  }
+
+  /** 更深一层的容器（抽屉、模态、浮层） */
+  .panel-raised {
+    @apply rounded-panel border border-border-strong bg-elevated shadow-raised;
+  }
+
+  /** 无边框的嵌入块（面板内部的分组，避免"框套框"） */
+  .inset {
+    @apply rounded-control border border-border/60 bg-bg/40;
+  }
+
+  .divider {
+    @apply h-px w-full bg-border;
+  }
+
+  /* ---------------------------------------------------------------- 控件 */
+
+  .btn {
+    @apply inline-flex cursor-pointer select-none items-center justify-center gap-2
+           rounded-control px-3 py-2 text-sm font-medium
+           transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-[#06240F] hover:bg-accent/90 active:bg-accent/80;
+  }
+  .btn-ghost {
+    @apply btn border border-border text-fg-muted hover:border-border-strong
+           hover:bg-elevated hover:text-fg;
+  }
+  .btn-danger {
+    @apply btn border border-danger/40 text-danger hover:bg-danger-soft;
+  }
+  /** 极小号按钮（面板内的行内操作） */
+  .btn-xs {
+    @apply !px-2 !py-0.5 !text-2xs;
+  }
+
+  .input {
+    @apply w-full rounded-control border border-border bg-bg px-3 py-2 text-sm text-fg
+           transition-colors duration-fast
+           placeholder:text-fg-subtle
+           hover:border-border-strong
+           focus:border-accent/60 focus:outline-none;
+  }
+
+  /* ---------------------------------------------------------------- 标记 */
+
+  /** 状态标签（离线模式、示例、来源类型……） */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-2xs font-medium
+           whitespace-nowrap;
+  }
+  .chip-neutral {
+    @apply chip border border-border bg-muted text-fg-muted;
+  }
+  .chip-accent {
+    @apply chip bg-accent-soft text-accent;
+  }
+  .chip-warn {
+    @apply chip bg-warn-soft text-warn;
+  }
+  .chip-info {
+    @apply chip bg-info-soft text-info;
+  }
+  .chip-danger {
+    @apply chip bg-danger-soft text-danger;
+  }
+
+  /** 引用编号（正文里的 [LOC1-1-1]）——mono + 低对比底色，可点但不刺眼 */
+  .cite {
+    @apply rounded-[4px] bg-muted px-1 py-px font-mono text-[11.5px] font-medium
+           text-accent no-underline transition-colors duration-fast hover:bg-accent-soft;
+  }
+
+  /** 行内信息条（错误 / 提示 / 降级横幅，配合左侧状态点） */
+  .status-bar {
+    @apply flex items-start gap-2.5 rounded-card border px-3.5 py-2.5 text-xs leading-relaxed;
   }
 
   .dot {
     @apply inline-block h-2 w-2 shrink-0 rounded-full;
   }
 
-  .btn {
-    @apply inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm
-           font-medium transition-colors duration-150 disabled:cursor-not-allowed
-           disabled:opacity-40;
-  }
-  .btn-primary {
-    @apply btn bg-accent text-bg hover:bg-accent/90;
-  }
-  .btn-ghost {
-    @apply btn border border-border text-fg-muted hover:bg-muted hover:text-fg;
-  }
+  /* ---------------------------------------------------------------- 报告排版 */
 
-  .input {
-    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-fg
-           placeholder:text-fg-muted/60 focus:border-accent/60 focus:outline-none;
-  }
-
+  /**
+   * 报告是**用户真正要读的东西**，排版值得单独调（不是和界面控件共用一套比例）：
+   *   - 字号 13.5 → 14px、行高 1.75 → 1.8：中文正文在暗底上需要更宽松的行距；
+   *   - 标题层级用"颜色 + 字重 + 间距"三者区分（旧版只有字号差，扫读时找不到结构）；
+   *   - h2 加左侧竖线：长报告里章节感最强的一个视觉锚点。
+   */
   .report-body {
-    @apply text-[13.5px] leading-[1.75] text-fg;
+    @apply text-base leading-[1.8] text-fg;
   }
   .report-body h1 {
-    @apply mb-3 mt-6 text-lg font-medium text-fg first:mt-0;
+    @apply mb-4 mt-2 text-xl font-semibold tracking-tight text-fg;
   }
   .report-body h2 {
-    @apply mb-2 mt-5 text-base font-medium text-fg;
+    @apply mb-3 mt-7 border-l-2 border-accent/50 pl-3 text-lg font-semibold text-fg;
   }
   .report-body h3 {
-    @apply mb-2 mt-4 text-sm font-medium text-fg;
+    @apply mb-2 mt-5 text-base font-semibold text-fg;
+  }
+  .report-body h4 {
+    @apply mb-1.5 mt-4 text-sm font-semibold text-fg-muted;
   }
   .report-body p {
-    @apply my-2;
+    @apply my-2.5;
   }
   .report-body ul,
   .report-body ol {
-    @apply my-2 space-y-1 pl-5;
+    @apply my-2.5 space-y-1.5 pl-5;
   }
   .report-body ul {
-    @apply list-disc;
+    @apply list-disc marker:text-fg-subtle;
   }
   .report-body ol {
-    @apply list-decimal;
+    @apply list-decimal marker:text-fg-subtle;
+  }
+  .report-body li > p {
+    @apply my-0;
   }
   .report-body a {
-    @apply text-info underline decoration-info/40 underline-offset-2 hover:decoration-info;
+    @apply text-info underline decoration-info/40 underline-offset-2
+           transition-colors duration-fast hover:decoration-info;
+  }
+  .report-body strong {
+    @apply font-semibold text-fg;
   }
   .report-body code {
-    @apply rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-accent;
+    @apply rounded-[4px] bg-muted px-1 py-0.5 font-mono text-xs text-accent;
   }
   .report-body pre {
-    @apply my-3 overflow-x-auto rounded-lg bg-bg p-3 font-mono text-[12px];
+    @apply my-3 overflow-x-auto rounded-card border border-border bg-bg p-3 font-mono text-xs;
+  }
+  .report-body pre code {
+    @apply bg-transparent p-0 text-fg;
   }
   .report-body blockquote {
-    @apply my-3 border-l-2 border-border pl-3 text-fg-muted;
+    @apply my-3.5 rounded-r-control border-l-2 border-border-strong bg-elevated/40 py-1.5 pl-3.5
+           text-fg-muted;
   }
   .report-body table {
-    @apply my-3 w-full border-collapse text-[12.5px];
+    @apply my-4 w-full border-collapse overflow-hidden rounded-card text-xs;
   }
   .report-body th,
   .report-body td {
-    @apply border border-border px-2 py-1 text-left;
+    @apply border border-border px-2.5 py-1.5 text-left;
+  }
+  .report-body th {
+    @apply bg-elevated font-semibold text-fg;
   }
   .report-body hr {
-    @apply my-4 border-border;
+    @apply my-6 border-border;
+  }
+  /* 报告里的引用编号统一走 .cite 的观感（markdown 渲染出的裸编号不会带类，
+     但块级元素里的编号由 ReportView 单独处理；这里兜底行内 code 形态） */
+  .report-body :not(pre) > code {
+    white-space: nowrap;
   }
 }
 
@@ -164,14 +295,21 @@
   .report-body * {
     color: #111 !important;
   }
-  .panel {
+  .panel,
+  .panel-raised {
     border: none !important;
     border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
   }
   .report-body h1,
   .report-body h2,
-  .report-body h3 {
+  .report-body h3,
+  .report-body h4 {
     color: #000 !important;
+  }
+  .report-body h2 {
+    border-left-color: #999 !important;
   }
   .report-body a {
     color: #0645ad !important;
@@ -183,9 +321,16 @@
     color: #222 !important;
     border: 1px solid #e4e4e4 !important;
   }
+  .report-body blockquote {
+    background: #fafafa !important;
+    border-left-color: #bbb !important;
+  }
   .report-body th,
   .report-body td {
     border: 1px solid #ccc !important;
+  }
+  .report-body th {
+    background: #f3f3f3 !important;
   }
 
   @page {

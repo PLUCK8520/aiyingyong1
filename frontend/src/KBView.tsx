@@ -129,14 +129,14 @@ export function KBView() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-sm font-medium text-fg">本地知识库</h2>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-fg-muted">
+            <p className="mt-0.5 text-2xs leading-relaxed text-fg-muted">
               这里的文档会被「本地检索」节点召回，作为报告里 <code className="font-mono">[LOC*]</code>{" "}
               引用的来源。不需要联网、不消耗额度。
             </p>
           </div>
           <button
             type="button"
-            className="btn-ghost shrink-0 !text-[12px]"
+            className="btn-ghost shrink-0 !text-xs"
             onClick={() => void rebuild()}
             disabled={busy}
             title="换了 embedding 模型、或索引与磁盘不一致时使用"
@@ -162,21 +162,21 @@ export function KBView() {
 
         {/* 下面两条是"这个库能不能支撑出一份真报告"的关键前提，必须显式暴露 */}
         {stats && !stats.local_enabled && (
-          <p className="mt-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-fg">
+          <p className="mt-3 rounded-control border border-danger/40 bg-danger/10 px-3 py-2 text-xs leading-relaxed text-fg">
             本地知识库已被配置关闭（<code className="font-mono">ATTEST_LOCAL_ENABLED=0</code>
             ），这里的文档<strong className="font-medium">不会</strong>被任何节点检索到。
             改配置后重启后端即可生效。
           </p>
         )}
         {stats && !stats.web_search_ready && (
-          <p className="mt-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] leading-relaxed text-fg">
+          <p className="mt-3 rounded-control border border-warn/40 bg-warn/10 px-3 py-2 text-xs leading-relaxed text-fg">
             网络检索当前未接入（<code className="font-mono">ATTEST_SEARCH_MODE={stats.search_mode}</code>
             ），<strong className="font-medium">本地库是唯一的真实证据来源</strong>。
             库里没有的主题，系统会按「零造假」原则拒编而不是编造内容——这不是故障。
           </p>
         )}
         {stats && stats.embed_fallback === "hashing" && (
-          <p className="mt-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-fg-muted">
+          <p className="mt-2 rounded-control border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-fg-muted">
             向量检索走的是<strong className="font-medium text-fg">词法兜底</strong>
             （<code className="font-mono">ATTEST_EMBED_FALLBACK=hashing</code>）：当前厂商无
             embedding 接口时，用散列词袋代替语义向量。检索仍可用，但
@@ -190,8 +190,8 @@ export function KBView() {
       {error && (
         <div role="alert" className="panel flex items-start gap-2.5 border-danger/40 bg-danger/10 px-4 py-2.5">
           <span className="mt-1.5 dot bg-danger" aria-hidden="true" />
-          <p className="flex-1 text-[12.5px] leading-relaxed text-fg">{error}</p>
-          <button type="button" className="btn-ghost !px-2 !py-0.5 !text-[11px]" onClick={() => setError(null)}>
+          <p className="flex-1 text-xs leading-relaxed text-fg">{error}</p>
+          <button type="button" className="btn-ghost !px-2 !py-0.5 !text-2xs" onClick={() => setError(null)}>
             关闭
           </button>
         </div>
@@ -199,8 +199,8 @@ export function KBView() {
       {notice && (
         <div className="panel flex items-start gap-2.5 border-accent/40 bg-accent/10 px-4 py-2.5">
           <span className="mt-1.5 dot bg-accent" aria-hidden="true" />
-          <p className="flex-1 text-[12.5px] leading-relaxed text-fg">{notice}</p>
-          <button type="button" className="btn-ghost !px-2 !py-0.5 !text-[11px]" onClick={() => setNotice(null)}>
+          <p className="flex-1 text-xs leading-relaxed text-fg">{notice}</p>
+          <button type="button" className="btn-ghost !px-2 !py-0.5 !text-2xs" onClick={() => setNotice(null)}>
             关闭
           </button>
         </div>
@@ -208,7 +208,7 @@ export function KBView() {
 
       {/* ------------------------------------------------ 上传 */}
       <section
-        className={`panel border-dashed p-6 text-center transition-colors duration-150 ${
+        className={`panel border-dashed p-6 text-center transition-colors duration-fast ${
           dragging ? "border-accent bg-accent/5" : "border-border"
         }`}
         onDragOver={(e) => {
@@ -234,13 +234,13 @@ export function KBView() {
             e.target.value = "";
           }}
         />
-        <p className="text-[13px] text-fg">
+        <p className="text-sm text-fg">
           {busy ? "正在入库…" : dragging ? "松开即可导入" : "把文档拖到这里"}
         </p>
-        <p className="mt-1 text-[11px] text-fg-muted">支持 md / txt / pdf，单文件 ≤ 8MB</p>
+        <p className="mt-1 text-2xs text-fg-muted">支持 md / txt / pdf，单文件 ≤ 8MB</p>
         <button
           type="button"
-          className="btn-primary mx-auto mt-3 !text-[12px]"
+          className="btn-primary mx-auto mt-3 !text-xs"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
         >
@@ -252,7 +252,7 @@ export function KBView() {
       <section className="panel flex min-h-0 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="text-sm font-medium text-fg">文档清单</h2>
-          <span className="text-[11px] text-fg-muted">
+          <span className="text-2xs text-fg-muted">
             {loading ? "加载中…" : `${docs.length} 个`}
           </span>
         </div>
@@ -263,7 +263,7 @@ export function KBView() {
           ) : docs.length === 0 ? (
             <div className="px-3 py-8 text-center">
               <p className="text-xs text-fg-muted">知识库还是空的</p>
-              <p className="mt-1 text-[11px] text-fg-muted/70">
+              <p className="mt-1 text-2xs text-fg-subtle">
                 传一份你自己的资料进来，再问一个相关问题试试
               </p>
             </div>
@@ -272,24 +272,24 @@ export function KBView() {
               {docs.map((d) => (
                 <li
                   key={d.name}
-                  className="group flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-muted/50"
+                  className="group flex items-center gap-3 rounded-control px-3 py-2 hover:bg-elevated/50"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[12.5px] text-fg">{d.title}</span>
+                      <span className="truncate text-xs text-fg">{d.title}</span>
                       {d.sample && (
-                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-fg-muted">
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-fg-muted">
                           示例
                         </span>
                       )}
                     </div>
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-fg-muted/70">
+                    <p className="mt-0.5 truncate font-mono text-2xs text-fg-subtle">
                       {d.name} · {fmtBytes(d.size)} · {d.chunks} 块 · {fmtTime(d.modified)}
                     </p>
                   </div>
                   <button
                     type="button"
-                    className="btn-ghost shrink-0 !px-2 !py-1 !text-[11px] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+                    className="btn-ghost shrink-0 !px-2 !py-1 !text-2xs opacity-0 transition-opacity duration-fast group-hover:opacity-100 focus-visible:opacity-100"
                     onClick={() => void remove(d.name)}
                     disabled={pending === d.name}
                     aria-label={`移除 ${d.name}`}
@@ -304,7 +304,7 @@ export function KBView() {
 
         {stats && (
           <div className="border-t border-border px-4 py-2">
-            <p className="truncate font-mono text-[10px] text-fg-muted/60" title={stats.docs_dir}>
+            <p className="truncate font-mono text-2xs text-fg-subtle" title={stats.docs_dir}>
               目录 {stats.docs_dir}
             </p>
           </div>
@@ -317,9 +317,9 @@ export function KBView() {
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
-      <p className="text-[11px] text-fg-muted">{label}</p>
-      <p className="mt-0.5 font-mono text-[15px] text-fg">{value}</p>
-      {hint && <p className="mt-0.5 truncate text-[10px] text-fg-muted/70">{hint}</p>}
+      <p className="text-2xs text-fg-muted">{label}</p>
+      <p className="mt-0.5 font-mono text-lg text-fg">{value}</p>
+      {hint && <p className="mt-0.5 truncate text-2xs text-fg-subtle">{hint}</p>}
     </div>
   );
 }

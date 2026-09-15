@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  STATUS_META,
   streamChat,
   type AnyEvent,
   type ReportResult,
@@ -335,53 +336,63 @@ export default function App() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col gap-3">
+        {/* 顶栏：会话身份（左）+ 视图切换（右）。
+            标题用 base 字号而非 sm——它是这一屏的"我在看哪次调研"的唯一标识。 */}
         <header className="panel no-print flex items-center justify-between gap-4 px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium text-fg">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-base font-semibold tracking-tight text-fg">
               {activeSession?.query || "新会话"}
-            </h2>
-            <p className="mt-0.5 flex items-center gap-2 text-[11px] text-fg-muted">
+            </h1>
+            <div className="mt-1 flex items-center gap-2 text-2xs text-fg-subtle">
               {activeId ? (
-                <span className="font-mono">{activeId}</span>
+                <span className="font-mono" title={activeId}>
+                  {activeId}
+                </span>
               ) : (
                 <span>尚未创建会话</span>
               )}
               {mockMode && (
-                <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] text-warn">
-                  离线 mock 模式
+                <span className="chip-warn" title="当前 LLM 走离线 mock，产出仅供链路验证">
+                  离线 mock
                 </span>
               )}
-            </p>
+              <StatusPill status={status} />
+            </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border p-0.5">
+          {/* 视图切换：选中项带边框 + 抬升底色（不只是变色），
+              让"当前在哪一屏"在余光里也能看出来。 */}
+          <nav
+            className="flex shrink-0 items-center gap-0.5 rounded-control border border-border bg-bg/60 p-0.5"
+            aria-label="视图切换"
+          >
             {(["progress", "report", "kb"] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
-                className={`cursor-pointer rounded-md px-2.5 py-1 text-[12px] transition-colors duration-150 ${
-                  tab === t ? "bg-muted text-fg" : "text-fg-muted hover:text-fg"
-                }`}
+                aria-current={tab === t ? "page" : undefined}
+                className={`cursor-pointer rounded-[6px] px-3 py-1.5 text-xs font-medium
+                            transition-colors duration-fast ${
+                              tab === t
+                                ? "bg-elevated text-fg shadow-card"
+                                : "text-fg-muted hover:bg-elevated/60 hover:text-fg"
+                            }`}
               >
                 {TAB_LABEL[t]}
               </button>
             ))}
-          </div>
+          </nav>
         </header>
 
         {error && (
           <div
             role="alert"
-            className="panel no-print flex items-start gap-2.5 border-danger/40 bg-danger/10 px-4 py-2.5"
+            className="status-bar no-print animate-fade-in border-danger/40 bg-danger-soft/60"
           >
             <span className="mt-1.5 dot bg-danger" aria-hidden="true" />
-            <p className="flex-1 text-[12.5px] leading-relaxed text-fg">{error}</p>
-            <button
-              type="button"
-              className="btn-ghost !px-2 !py-0.5 !text-[11px]"
-              onClick={() => setError(null)}
-            >
+            <p className="flex-1 text-fg">{error}</p>
+            <button type="button" className="btn-ghost btn-xs" onClick={() => setError(null)}>
               关闭
             </button>
           </div>
@@ -405,46 +416,56 @@ export default function App() {
               sufficiency={report.evidence_sufficiency}
             />
           ) : (
-            <div className="panel flex flex-1 flex-col items-center justify-center p-8">
-              <p className="text-[13px] text-fg-muted">还没有可查看的报告</p>
-              <p className="mt-1.5 text-[12px] text-fg-muted/70">
-                {status === "awaiting_confirm"
-                  ? "请先在上方弹窗中确认大纲"
-                  : "完成一次调研后将在此显示"}
-              </p>
-            </div>
+            <EmptyReport status={status} />
           )}
         </div>
 
-        <div className="panel no-print flex items-end gap-2 p-3">
-          <div className="min-w-0 flex-1">
-            <label htmlFor="q" className="sr-only">
-              调研问题
-            </label>
-            <textarea
-              id="q"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  void startNew();
-                }
-              }}
-              rows={2}
-              placeholder="输入调研问题，例如：调研 企业知识库 Agent 平台 市场，按市场规模/竞品/收费模式三部分输出"
-              className="input resize-none !text-[13px]"
-              disabled={submitting}
-            />
+        {/* 输入区：把"提示 + 快捷键"做进来。旧版只有一个 placeholder，
+            用户不知道可以 Ctrl/⌘+Enter 直接提交。 */}
+        <div className="panel no-print p-3">
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="q" className="sr-only">
+                调研问题
+              </label>
+              <textarea
+                id="q"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    void startNew();
+                  }
+                }}
+                rows={2}
+                placeholder="输入调研问题，例如：调研 企业知识库 Agent 平台 市场，按市场规模/竞品/收费模式三部分输出"
+                className="input resize-none !text-sm"
+                disabled={submitting}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn-primary mb-0.5 shrink-0"
+              onClick={() => void startNew()}
+              disabled={!query.trim() || submitting || running}
+            >
+              {submitting || running ? (
+                <>
+                  <span className="dot animate-breathe bg-[#06240F]" aria-hidden="true" />
+                  运行中
+                </>
+              ) : (
+                "开始调研"
+              )}
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn-primary mb-0.5 shrink-0"
-            onClick={() => void startNew()}
-            disabled={!query.trim() || submitting || running}
-          >
-            {submitting || running ? "运行中…" : "开始调研"}
-          </button>
+          <p className="mt-2 flex items-center gap-1.5 px-0.5 text-2xs text-fg-subtle">
+            <kbd className="rounded border border-border bg-bg px-1 font-mono">Ctrl</kbd>
+            <span>+</span>
+            <kbd className="rounded border border-border bg-bg px-1 font-mono">Enter</kbd>
+            <span>提交 · 报告会自动落盘到 data/reports/</span>
+          </p>
         </div>
       </main>
 
@@ -455,6 +476,48 @@ export default function App() {
       {confirm && (
         <ConfirmModal payload={confirm} busy={busy} onDecide={(a, p) => void decide(a, p)} />
       )}
+    </div>
+  );
+}
+
+/**
+ * 会话状态徽标。文案与配色取自 `api.ts` 的 `STATUS_META`（**唯一**口径）——
+ * 这里只负责渲染，不再自己定义一份（否则 Sidebar 的改动会悄悄落后）。
+ */
+function StatusPill({ status }: { status: SessionStatus }) {
+  const meta = STATUS_META[status];
+  if (!meta || status === "idle") return null;
+  return (
+    <span className={meta.chip}>
+      {meta.pulse && <span className="dot animate-breathe bg-current" aria-hidden="true" />}
+      {meta.label}
+    </span>
+  );
+}
+
+/** 报告空态：把"为什么没有报告"讲清楚（旧版两句灰字，用户不知道下一步做什么）。 */
+function EmptyReport({ status }: { status: SessionStatus }) {
+  const hint =
+    status === "awaiting_confirm"
+      ? "请先在上方弹窗中确认大纲，确认后即开始检索与撰写。"
+      : status === "running"
+        ? "调研进行中——完成后报告会自动出现在这里。"
+        : "在下方输入问题并「开始调研」，完成后报告会出现在这里。";
+  return (
+    <div className="panel flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
+      <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-pill border border-border bg-elevated text-fg-subtle">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v13A1.5 1.5 0 0 1 14.5 20h-9A1.5 1.5 0 0 1 4 18.5v-13Z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <path d="M7.5 8h5M7.5 11h5M7.5 14h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="M18 8v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+      <p className="text-sm font-medium text-fg-muted">还没有可查看的报告</p>
+      <p className="max-w-[38ch] text-xs leading-relaxed text-fg-subtle">{hint}</p>
     </div>
   );
 }

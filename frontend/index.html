@@ -8,13 +8,19 @@
       name="description"
       content="Attest（质证）· 逐句质证的多 Agent 行业深度调研工作台"
     />
+    <!-- 主题色：让移动端浏览器地址栏与暗色界面同色（否则顶部会有一条亮边） -->
+    <meta name="theme-color" content="#0B1220" />
     <title>Attest 质证 · 调研工作台</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!--
+      T9.2：字体已改为**自托管**（`src/fonts.css` + `public/fonts/*.woff2`）。
+
+      原先是 `<link>` 引 fonts.googleapis.com。2026-09-15 实测该域名与 gstatic
+      的 woff2 在本机**可达**，所以**不是「加载不到」**——改自托管的真实理由是：
+        ① 首屏不再依赖境外域名（即使通，也是数百 ms～数秒的不可控变量）；
+        ② 离线 / 局域网演示可用（`start.bat --lan` 那条路径）；
+        ③ 少两次 DNS/TLS 往返。
+      故此处**刻意不再引外链**；重新生成字体见 `scripts/fetch_fonts.py`。
+    -->
   </head>
   <body>
     <div id="root"></div>

@@ -62,28 +62,28 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
           <h2 id="confirm-title" className="text-sm font-medium text-fg">
             大纲确认
           </h2>
-          <p className="mt-1 text-[12px] leading-relaxed text-fg-muted">
+          <p className="mt-1 text-xs leading-relaxed text-fg-muted">
             已生成调研大纲。确认后开始并行检索；也可修改章节后再继续。
           </p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-4">
-            <p className="text-[11px] uppercase tracking-wide text-fg-muted">调研目标</p>
-            <p className="mt-1 text-[13px] leading-relaxed text-fg">
+            <p className="text-2xs uppercase tracking-wide text-fg-muted">调研目标</p>
+            <p className="mt-1 text-sm leading-relaxed text-fg">
               {payload.objective || "（未给出目标）"}
             </p>
           </div>
 
           <div className="mb-4">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] uppercase tracking-wide text-fg-muted">
+              <p className="text-2xs uppercase tracking-wide text-fg-muted">
                 报告大纲（{outlines.length} 章）
               </p>
               {!editing && (
                 <button
                   type="button"
-                  className="btn-ghost !px-2 !py-1 !text-[11px]"
+                  className="btn-ghost !px-2 !py-1 !text-2xs"
                   onClick={() => {
                     setEditing(true);
                     setTimeout(() => firstRef.current?.focus(), 0);
@@ -101,11 +101,11 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
                   value={outlines.join("\n")}
                   onChange={(e) => setOutlines(e.target.value.split("\n"))}
                   rows={Math.max(4, outlines.length + 1)}
-                  className="input resize-y font-mono !text-[12.5px] leading-relaxed"
+                  className="input resize-y font-mono !text-xs leading-relaxed"
                   placeholder="每行一个章节标题"
                   aria-label="编辑报告大纲，每行一个章节"
                 />
-                <div className="flex items-center gap-3 text-[11px] text-fg-muted">
+                <div className="flex items-center gap-3 text-2xs text-fg-muted">
                   <span>每行一章，空行会被忽略</span>
                   {changed && <span className="text-warn">已修改</span>}
                   {!valid && <span className="text-danger">章节不能为空</span>}
@@ -114,8 +114,8 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
             ) : (
               <ol className="space-y-1.5">
                 {outlines.map((o, i) => (
-                  <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed">
-                    <span className="shrink-0 font-mono text-[11px] text-fg-muted">
+                  <li key={i} className="flex gap-2.5 text-sm leading-relaxed">
+                    <span className="shrink-0 font-mono text-2xs text-fg-muted">
                       {i + 1}.
                     </span>
                     <span className="text-fg">{o}</span>
@@ -127,16 +127,16 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
 
           {payload.sub_questions.length > 0 && (
             <div>
-              <p className="mb-2 text-[11px] uppercase tracking-wide text-fg-muted">
+              <p className="mb-2 text-2xs uppercase tracking-wide text-fg-muted">
                 检索子问题（{payload.sub_questions.length} 个）
               </p>
               <ul className="space-y-1">
                 {payload.sub_questions.map((q, i) => (
                   <li
                     key={i}
-                    className="flex gap-2.5 text-[12px] leading-relaxed text-fg-muted"
+                    className="flex gap-2.5 text-xs leading-relaxed text-fg-muted"
                   >
-                    <span className="shrink-0 font-mono text-[11px]">{i + 1}.</span>
+                    <span className="shrink-0 font-mono text-2xs">{i + 1}.</span>
                     <span>{q}</span>
                   </li>
                 ))}
