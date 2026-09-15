@@ -47,6 +47,9 @@ data/trace/
 data/reports/
 data/cache/
 eval/reports/
+# 评测批次的分轮 stdout/stderr 日志（T9.1 的 eval_ab_t91.py 会写；同 data/t.log 一类，
+# 属运行时产物。⚠️ 注意 `data/*.log` 只挡 data/ 根下**一层**，挡不住子目录）
+data/eval-logs/
 
 # ---- 前端 ----
 node_modules/
