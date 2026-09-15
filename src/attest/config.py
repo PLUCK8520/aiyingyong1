@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     #: 故 trace 里会把 provider 标成 `mock-hashing(兜底)`——不许悄悄冒充真向量。
     embed_fallback: Literal["none", "hashing"] = Field("none", alias="ATTEST_EMBED_FALLBACK")
     tavily_api_key: str | None = Field(None, alias="TAVILY_API_KEY")
+    #: T2.1 额度保护线：Tavily 检索的录制/回放模式。
+    #:   `replay`（**默认**）——只读本地缓存；缓存未命中返回空，**永不联网、永不消耗额度**；
+    #:   `record` —— 强制打真实 API 并把响应落盘（每次 1 credit）；
+    #:   `auto`   —— 有缓存用缓存，没缓存就打真实 API（**会悄悄烧额度**，排查/演示慎用）。
+    #: ⚠️ 默认必须是 `replay`：Tavily 免费档 1000 credits/月（①额度数字待复核，见审查报告 F-4），
+    #:    而开发期一轮调研要 3~5 次检索——默认 `auto` 会让"跑一轮看看"直接扣额度，
+    #:    与"额度保护线"的设计意图相反。要录新 query 时显式设成 `record`。
+    tavily_mode: Literal["auto", "replay", "record"] = Field("replay", alias="ATTEST_TAVILY_MODE")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen3:4b", alias="OLLAMA_MODEL")
 

@@ -78,7 +78,17 @@ def make_search_client(settings: Settings) -> SearchClient:
     if settings.search_mode == "tavily":
         assert settings.tavily_api_key  # config 已校验
         log.info("[graph] 检索走 tavily（含录制/回放缓存）")
-        return TavilyClient(settings.tavily_api_key, DATA_DIR / "cache")
+        return TavilyClient(
+            settings.tavily_api_key,
+            DATA_DIR / "cache",
+            # T2.1 额度保护线：模式**必须**由配置传入（dataclass 默认已是 replay）。
+            # 曾经这里不传 mode，吃 dataclass 默认值 `auto` —— 那等于"没缓存就联网"，
+            # 与模块文档写的"默认 replay"相反：配上 key 后第一次跑就会静默扣 credits。
+            mode=settings.tavily_mode,
+            # 原文截断上限复用全局上下文上限：Tavily 的 `raw_content` 是**整页正文**，
+            # 不截会直接把 LLM 上下文与预算顶爆（接真实检索后必然踩到）。
+            max_content_chars=settings.context_truncate_chars,
+        )
     log.info("[graph] 检索走离线 fixture 回放")
     return FixtureSearchClient(settings.fixture_dir / "web")
 
