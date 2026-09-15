@@ -13,6 +13,8 @@
  * 也开不了新会话——那是功能丢失，不是布局取舍。
  */
 
+import { useMemo } from "react";
+
 import { STATUS_META, type SessionMeta } from "./api";
 
 interface Props {
@@ -36,6 +38,10 @@ export function Sidebar({
   open = false,
   onClose,
 }: Props) {
+  // 43 个会话平铺成一长条是**信息噪音**：用户心里真实的检索维度是"哪天的"，
+  // 而不是从一长串里逐行找。分组后扫读成本明显下降（空组不渲染）。
+  const groups = useMemo(() => groupSessions(sessions), [sessions]);
+
   return (
     <>
       {/* 抽屉遮罩：只在 lg 以下存在。
@@ -159,72 +165,94 @@ export function Sidebar({
               </p>
             </div>
           ) : (
-            <ul className="space-y-0.5">
-              {sessions.map((s, i) => {
-                const meta = STATUS_META[s.status];
-                const active = s.thread_id === activeId;
-                return (
-                  <li key={s.thread_id}>
-                    {/* 选中态用"左侧渐变竖条 + 抬升底色"两个信号，而不是只换背景色——
-                        只换底色在暗色里几乎看不出来。竖条用渐变（上实下虚）与
-                        报告正文 h2 的左侧标记同一套语言，全站"当前项"看着像一路的。
+            <div className="space-y-3.5">
+              {groups.map((g) => (
+                <section key={g.label}>
+                  {/* 分组标题做成 sticky：长列表滚动时始终知道"这是哪一档"。
+                      样式刻意比会话项**更安静**——它的职责是分区，不是当内容。 */}
+                  <p
+                    className="sticky top-0 z-10 -mx-2 mb-1 bg-rail/90 px-4 pb-1 pt-1
+                               text-2xs font-medium tracking-wider text-fg-subtle/70
+                               backdrop-blur-sm"
+                  >
+                    {g.label}
+                    <span className="ml-1.5 font-mono opacity-60">{g.items.length}</span>
+                  </p>
+                  <ul className="space-y-0.5">
+                    {g.items.map((s, i) => {
+                      const meta = STATUS_META[s.status];
+                      const active = s.thread_id === activeId;
+                      return (
+                        <li key={s.thread_id}>
+                          {/* 选中态用"左侧渐变竖条 + 抬升底色"两个信号，而不是只换背景色——
+                              只换底色在暗色里几乎看不出来。竖条用渐变（上实下虚）与
+                              报告正文 h2 的左侧标记同一套语言，全站"当前项"看着像一路的。
 
-                        逐项 stagger：列表出现时有从下往上的节奏，
-                        比整块一起闪现更像"内容被加载进来"。上限 8 项，
-                        否则长列表末尾要等一秒多才出现。 */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelect(s.thread_id);
-                        // 抽屉模式下选完会话就该收起来，否则用户还得再点一次遮罩
-                        onClose?.();
-                      }}
-                      aria-current={active ? "true" : undefined}
-                      style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}
-                      className={`group relative w-full animate-fade-up cursor-pointer rounded-control
-                                  py-2 pl-3.5 pr-2.5 text-left transition-colors duration-fast ${
-                                    active ? "bg-elevated" : "hover:bg-elevated/50"
-                                  }`}
-                    >
-                      {active && (
-                        <span
-                          className="absolute bottom-2 left-0 top-2 w-[2px] rounded-pill
-                                     bg-gradient-to-b from-accent to-accent/20"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <div className="flex items-start gap-2">
-                        <span
-                          className={`dot mt-1.5 ${meta.color} ${
-                            meta.pulse ? "animate-pulse-soft" : ""
-                          }`}
-                          title={meta.label}
-                          aria-hidden="true"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p
-                            className={`truncate text-xs leading-snug ${
-                              active ? "font-medium text-fg" : "text-fg-muted group-hover:text-fg"
-                            }`}
+                              逐项 stagger：列表出现时有从下往上的节奏。
+                              上限 8 项，否则长列表末尾要等一秒多才出现。 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelect(s.thread_id);
+                              // 抽屉模式下选完会话就该收起来，否则用户还得再点一次遮罩
+                              onClose?.();
+                            }}
+                            aria-current={active ? "true" : undefined}
+                            // thread_id 挪进 title：它**不该占主视觉**（43 项全是
+                            // `web-1789…` 这种机器串，堆起来就是纯噪音），
+                            // 但排查问题时要能拿到，所以保留在悬浮提示里。
+                            title={`thread_id: ${s.thread_id}`}
+                            style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}
+                            className={`group relative w-full animate-fade-up cursor-pointer rounded-control
+                                        py-2 pl-3.5 pr-2.5 text-left transition-colors duration-fast ${
+                                          active ? "bg-elevated" : "hover:bg-elevated/50"
+                                        }`}
                           >
-                            {s.query || "（未命名会话）"}
-                          </p>
-                          <p className="mt-1 flex items-center gap-1.5 text-2xs text-fg-subtle">
-                            <span>{meta.label}</span>
-                            <span aria-hidden="true" className="text-fg-subtle/50">
-                              ·
-                            </span>
-                            <span className="truncate font-mono opacity-75">
-                              {s.thread_id.slice(0, 10)}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                            {active && (
+                              <span
+                                className="absolute bottom-2 left-0 top-2 w-[2px] rounded-pill
+                                           bg-gradient-to-b from-accent to-accent/20"
+                                aria-hidden="true"
+                              />
+                            )}
+                            <div className="flex items-start gap-2">
+                              <span
+                                className={`dot mt-1.5 ${meta.color} ${
+                                  meta.pulse ? "animate-pulse-soft" : ""
+                                }`}
+                                title={meta.label}
+                                aria-hidden="true"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p
+                                  className={`truncate text-xs leading-snug ${
+                                    active
+                                      ? "font-medium text-fg"
+                                      : "text-fg-muted group-hover:text-fg"
+                                  }`}
+                                >
+                                  {s.query || "（未命名会话）"}
+                                </p>
+                                <p className="mt-1 flex items-center gap-1.5 text-2xs text-fg-subtle">
+                                  <span className="shrink-0">{meta.label}</span>
+                                  <span aria-hidden="true" className="text-fg-subtle/50">
+                                    ·
+                                  </span>
+                                  {/* 时间比机器 ID 有用得多：找会话靠的是"大概什么时候跑的" */}
+                                  <span className="font-mono opacity-75">
+                                    {fmtSessionTime(s.created_at, g.label)}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
           )}
         </div>
 
@@ -249,6 +277,47 @@ export function Sidebar({
       </aside>
     </>
   );
+}
+
+/**
+ * 把会话按「今天 / 昨天 / 更早」分组（空组不返回）。
+ *
+ * **为什么值得分组**：43 个会话平铺成一长条时，用户心里真实的检索维度是"**哪天的**"，
+ * 而不是从一长串里逐行找。分组把"线性扫描"变成"先定位日期、再看那几项"——
+ * 列表越长，收益越明显。分组算法放在渲染之外（`useMemo`），不塞进 JSX。
+ */
+function groupSessions(sessions: SessionMeta[]): { label: string; items: SessionMeta[] }[] {
+  const now = new Date();
+  // 本地时区的今天零点（`created_at` 是 Unix 秒，不是毫秒）
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  const yesterday = today - 86400;
+  const buckets = [
+    { label: "今天", items: [] as SessionMeta[] },
+    { label: "昨天", items: [] as SessionMeta[] },
+    { label: "更早", items: [] as SessionMeta[] },
+  ];
+  for (const s of sessions) {
+    const t = s.created_at ?? 0;
+    if (t >= today) buckets[0].items.push(s);
+    else if (t >= yesterday) buckets[1].items.push(s);
+    else buckets[2].items.push(s);
+  }
+  return buckets.filter((b) => b.items.length > 0);
+}
+
+/**
+ * 会话的时间标签：当天只给「时:分」，更早的给「月-日」（年份靠分组标题已经表达）。
+ *
+ * 这个字段是**替换 thread_id 上来的**——原先每项都挂 `web-1789286556753`，
+ * 43 项堆在一起就是纯噪音；而"大概什么时候跑的"才是用户真正用来找会话的线索。
+ */
+function fmtSessionTime(ts: number, group: string): string {
+  const d = new Date((ts ?? 0) * 1000);
+  if (Number.isNaN(d.getTime()) || !ts) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return group === "更早"
+    ? `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    : `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /**

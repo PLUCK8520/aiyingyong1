@@ -53,6 +53,21 @@ const TAB_LABEL: Record<Tab, string> = {
   kb: "知识库",
 };
 
+/**
+ * 空态示例问题。
+ *
+ * ⚠️ 这三条**不是随便编的文案**——它们都来自项目自带的离线语料（`data/fixtures`），
+ * 所以点下去**真的能跑出带引用的报告**。写一个语料覆盖不到的问题，
+ * 会让用户第一次使用就一头撞进「证据不足 · 系统主动拒编」，
+ * 那是非常差的初体验（他会以为系统坏了）。
+ * 换言之：示例问题必须**跑得通**，这是一条硬约束，不是文案选择。
+ */
+const EXAMPLE_QUERIES = [
+  "调研国产数据库替换的驱动因素与落地情况",
+  "调研新能源汽车出海的竞争格局与政策环境",
+  "调研大模型推理成本的构成与优化趋势",
+];
+
 export default function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -487,6 +502,26 @@ export default function App() {
             void startNew();
           }}
         >
+          {/* 空态引导：给几个**可点**的示例。
+              用户面对空输入框时，最难的不是"怎么问"而是"问什么"——
+              给三条真跑得通的例子，比一句 placeholder 有用得多。 */}
+          {!activeId && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="shrink-0 text-2xs text-fg-subtle">试试</span>
+              {EXAMPLE_QUERIES.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setQuery(q)}
+                  className="chip-neutral max-w-full cursor-pointer truncate transition-colors
+                             duration-fast hover:border-border-strong hover:bg-elevated hover:text-fg"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
             <div className="min-w-0 flex-1">
               <label htmlFor="q" className="sr-only">
@@ -567,14 +602,15 @@ function EmptyReport({ status }: { status: SessionStatus }) {
         ? "调研进行中——完成后报告会自动出现在这里。"
         : "在下方输入问题并「开始调研」，完成后报告会出现在这里。";
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-8 text-center">
-      {/* 空态的图标容器用"内凹"而不是"浮现"：它不该比内容更抢眼 */}
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+      {/* 报告页空态用**中性提亮**而不是内凹：它表达的是"等待中"，
+          不该像进度页空态那样带 accent 光晕（那会暗示"可以开始了"）。 */}
       <div
-        className="mb-1 flex h-11 w-11 items-center justify-center rounded-panel border
-                   border-border/70 bg-bg/60 text-fg-subtle
-                   shadow-[inset_0_1px_2px_rgba(0,0,0,.35)]"
+        className="flex h-12 w-12 items-center justify-center rounded-panel border
+                   border-border-strong/60 bg-elevated/70 text-fg-muted
+                   shadow-[inset_0_1px_0_rgba(255,255,255,.06)]"
       >
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v13A1.5 1.5 0 0 1 14.5 20h-9A1.5 1.5 0 0 1 4 18.5v-13Z"
             stroke="currentColor"
@@ -589,8 +625,8 @@ function EmptyReport({ status }: { status: SessionStatus }) {
           <path d="M18 8v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </div>
-      <p className="text-sm font-medium text-fg-muted">还没有可查看的报告</p>
-      <p className="max-w-[38ch] text-xs leading-relaxed text-fg-subtle">{hint}</p>
+      <p className="text-sm font-semibold tracking-tight text-fg">还没有可查看的报告</p>
+      <p className="max-w-[40ch] text-xs leading-relaxed text-fg-muted">{hint}</p>
     </div>
   );
 }

@@ -24,13 +24,15 @@ export function ProgressStream({ timeline, running, phase }: Props) {
 
   if (timeline.length === 0 && !running) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-8 text-center">
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+        {/* 图标容器带一点 accent 光晕：空态是用户第一眼看到的东西，
+            纯灰会读成"这里什么都没有"；一点冷光就把它变成"准备好了，等你开始"。 */}
         <div
-          className="mb-1 flex h-11 w-11 items-center justify-center rounded-panel border
-                     border-border/70 bg-bg/60 text-fg-subtle
-                     shadow-[inset_0_1px_2px_rgba(0,0,0,.35)]"
+          className="flex h-12 w-12 items-center justify-center rounded-panel border
+                     border-accent/20 bg-accent/[0.06] text-accent
+                     shadow-[inset_0_1px_0_rgba(255,255,255,.06),0_0_28px_-8px_rgba(34,197,94,.45)]"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="11" cy="11" r="6.2" stroke="currentColor" strokeWidth="1.6" />
             <path
               d="m15.6 15.6 3.4 3.4"
@@ -40,10 +42,13 @@ export function ProgressStream({ timeline, running, phase }: Props) {
             />
           </svg>
         </div>
-        <p className="text-sm font-medium text-fg-muted">还没有开始调研</p>
-        <p className="max-w-[42ch] text-xs leading-relaxed text-fg-subtle">
-          在下方输入一个调研问题开始。系统会先规划大纲、向你确认，
-          再并行检索、逐句质证，最后产出带可回查引用的报告。
+        <p className="text-sm font-semibold tracking-tight text-fg">还没有开始调研</p>
+        <p className="max-w-[44ch] text-xs leading-relaxed text-fg-muted">
+          在下方输入一个问题开始。系统会先规划大纲、向你确认，再并行检索、逐句质证，
+          最后产出<span className="text-fg">每一句结论都能回查来源</span>的报告。
+        </p>
+        <p className="text-2xs leading-relaxed text-fg-subtle/80">
+          左侧是历史记录——点任意一条，直接看它跑出来的报告。
         </p>
       </div>
     );
