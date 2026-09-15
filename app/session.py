@@ -14,6 +14,12 @@
     - 后果二：进程重启后内存态丢失。**但调研状态本身不丢**——它在 `checkpoints.sqlite` 里，
       重启后用同一 `thread_id` 走 `GET /api/session/{id}` 就能看到"待确认/可续跑"。
       这是"检查点持久 / 元数据易失"的**有意分层**：审计与续跑靠检查点，实时展示靠内存。
+    - ⚠️ **T9.5 补的第三条（上面那条分层自己挖的坑）**：既然列表也读内存，重启后列表就是空的——
+      而**列表是唯一入口**，拿不到 `thread_id` 就走不了上面那条恢复路径。
+      分层的初衷没错，但它漏了"入口本身也得能恢复"这一步，实际效果是
+      **数据一直健在、界面上却是"还没有会话"**（在用户眼里与数据丢失无异）。
+      故 `start()` 现在会调 `recover_from_checkpoints()` 扫库把历史会话恢复进列表；
+      恢复出来的 `status` 是**推断值**（见 `_infer_status`），只在能确证时才宣称终态。
     - `TODO(scale)`：多 worker 时把 `list_sessions()` / 事件缓冲换成 SQLite 表或 Redis。
 
 ⚠️ **事件缓冲 vs 订阅队列（关键区别，别混）**：
@@ -119,6 +125,97 @@ class Session:
         }
 
 
+# ============================================================ 冷启动恢复（T9.5）
+
+def _infer_status(cv: dict[str, Any]) -> SessionStatus:
+    """从检查点里的 state 反推会话状态。
+
+    ⚠️ **这是推断值，不是原始值**——原状态随内存丢失了。所以规则刻意保守：
+    只在能**确证**时才宣称终态，其余一律落到 `aborted`（"跑过但没跑到终态"），
+    绝不把"跑到一半"美化成 `done`。
+
+    顺序即优先级：
+      1. 有 `report` / `direct_answer` → `done`（终态产物在手，确证）
+      2. 有 `errors` → `error`
+      3. 有 `plan` 但 `plan_approved` 为假 → `awaiting_confirm`（T5.4 静态断点挂起）
+      4. 其余 → `aborted`
+    """
+    if str(cv.get("report") or "").strip() or str(cv.get("direct_answer") or "").strip():
+        return "done"
+    if cv.get("errors"):
+        return "error"
+    if cv.get("plan") and not cv.get("plan_approved"):
+        return "awaiting_confirm"
+    return "aborted"
+
+
+def _recover_sessions_sync(db_path: Path) -> list[tuple[str, str, float, SessionStatus]]:
+    """同步扫检查点库，返回 [(thread_id, query, created_at, status)]。
+
+    **为什么必须有这个函数**（T9.5 修的确实是个真缺口）：
+      `_sessions` 是进程内存 dict，进程一重启列表就空。而**列表是唯一的入口**——
+      拿不到 thread_id 就走不了 `GET /api/session/{id}` 的恢复路径（那条路径 P6 就做好了，
+      本来就是为重启准备的）。结果：**数据一直在检查点里，用户在界面上却是"还没有会话"。**
+      本模块文档串承诺的"调研状态不丢"因此落空——不是数据丢了，是**不可达**。
+
+    **实现要点**：
+      - 只读 URI 打开，不与运行中的 `AsyncSqliteSaver` 争用；
+      - 每个 thread 只反解**最后一个**检查点（`MAX(rowid)`，LangGraph 顺序写入）；
+      - serde 用**默认宽容模式**（不设 `allowed_msgpack_modules`）——恢复历史数据时
+        宁可多认一个类型，也不要因白名单漏项而整条会话消失；
+      - 单条失败只跳过该条并留 warning，**不让一个坏检查点毁掉整个列表**。
+    """
+    import sqlite3
+
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    serde = JsonPlusSerializer()
+    uri = "file:%s?mode=ro" % str(db_path).replace("\\", "/")
+    out: list[tuple[str, str, float, SessionStatus]] = []
+    con = sqlite3.connect(uri, uri=True)
+    try:
+        rows = con.execute(
+            "SELECT c.thread_id, c.type, c.checkpoint FROM checkpoints c "
+            "WHERE c.rowid = (SELECT MAX(rowid) FROM checkpoints "
+            "                 WHERE thread_id = c.thread_id)"
+        ).fetchall()
+    finally:
+        con.close()
+
+    for tid, typ, blob in rows:
+        try:
+            ck = serde.loads_typed((typ, blob))
+        except Exception as e:  # noqa: BLE001 —— 单条坏数据不该拖垮整张列表
+            log.warning(f"[session] 检查点反解失败，跳过 thread={tid}: {type(e).__name__}: {e}")
+            continue
+        # ⚠️ 「能反解」不等于「是检查点」（T9.5 写测试时实测到的边界）：
+        # 畸形 blob 可能反解成别的东西而不抛异常——例如 `b"\x81garbage"` 会被 msgpack
+        # 认成一个 map。不认结构就跳过，否则侧栏里会冒出没有内容的僵尸会话。
+        if not isinstance(ck, dict) or "channel_values" not in ck:
+            log.warning(f"[session] 检查点结构异常，跳过 thread={tid}（type={typ}）")
+            continue
+        cv = ck.get("channel_values") or {}
+        query = str(cv.get("query") or "").strip()
+        created = _ckpt_ts(ck)
+        out.append((tid, query, created, _infer_status(cv)))
+    return out
+
+
+def _ckpt_ts(ck: dict[str, Any]) -> float:
+    """取检查点时间戳（LangGraph 存的是 ISO8601 字符串）。缺了就退回当前时间。"""
+    from datetime import datetime
+
+    ts = ck.get("ts")
+    if isinstance(ts, (int, float)):
+        return float(ts)
+    if isinstance(ts, str) and ts:
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return time.time()
+
+
 class SessionManager:
     """图的生命周期持有者（FastAPI lifespan 创建一次，挂到 `app.state`）。
 
@@ -148,6 +245,11 @@ class SessionManager:
         self._app = None  # 图延迟到首次运行前编译（见 _ensure_graph）
         self._started = True
         log.info(f"[session] SessionManager 已启动 | checkpointer=AsyncSqliteSaver | db={db_path}")
+        # T9.5：把检查点里的历史会话恢复进列表。
+        # 不做这一步，重启后侧栏永远是"还没有会话"——而列表是唯一入口，
+        # 用户就再也够不到那些其实健在的调研记录（数据没丢，只是不可达）。
+        n_recovered = await self.recover_from_checkpoints()
+        log.info(f"[session] 冷启动恢复：从检查点载入 {n_recovered} 个历史会话")
 
     async def stop(self) -> None:
         """关闭检查点连接。进程退出时调用。"""
@@ -195,6 +297,42 @@ class SessionManager:
     @staticmethod
     async def list_sessions() -> list[Session]:
         return sorted(_sessions.values(), key=lambda s: s.created_at, reverse=True)
+
+    async def recover_from_checkpoints(self) -> int:
+        """从检查点库重建会话列表（冷启动恢复）。返回恢复的条数。
+
+        ⚠️ **为什么这件事值得单独做**：`list_sessions()` 读的是内存 dict，
+        而它是**唯一入口**。列表空的 → 前端拿不到任何 thread_id →
+        `GET /api/session/{id}` 的恢复路径（P6 已做好的那条）永远走不到。
+        "数据没丢、只是不可达"在用户眼里和"数据丢了"没有区别。
+
+        同步 IO + msgpack 反解放 `asyncio.to_thread`：不在事件循环里做阻塞活
+        （启动期数据量小，但这属于既定红线）。恢复失败**不拦服务启动**——
+        宁可少一个历史列表，也不要让整个后端起不来。
+        """
+        db_path = Path(self.settings.checkpoint_db)
+        if not db_path.exists():
+            return 0
+        try:
+            rows = await asyncio.to_thread(_recover_sessions_sync, db_path)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[session] 冷启动恢复失败（服务照常启动）: {type(e).__name__}: {e}")
+            return 0
+
+        added = 0
+        async with _sessions_lock:
+            for tid, query, created, status in rows:
+                if tid in _sessions:
+                    continue  # 本进程内已建的会话优先，不覆盖内存态
+                _sessions[tid] = Session(
+                    thread_id=tid,
+                    # 空问题**如实标注**，不要伪造一个看起来正常的标题
+                    query=query or "（历史会话 · 问题未记录）",
+                    created_at=created,
+                    status=status,
+                )
+                added += 1
+        return added
 
     # ---------------- 运行 ----------------
     async def run(self, session: Session, *, decision: dict[str, Any] | None = None) -> None:
