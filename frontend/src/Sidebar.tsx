@@ -3,6 +3,10 @@
  *
  * 交互态（《功能设计》§8）：
  *   空态给引导文案；会话项显示状态点（运行中/已完成/已中断）。
+ *
+ * T9.3 · 视觉定位：侧栏是**背景层**（`.rail` 而非 `.panel`）。
+ * 它与主内容区用同一种卡片样式时，整屏会读成"三个等重的盒子"，
+ * 眼睛失去落点；退成 rail 之后，中间的"纸面"才浮得起来。
  */
 
 import { STATUS_META, type SessionMeta } from "./api";
@@ -17,16 +21,18 @@ interface Props {
 
 export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props) {
   return (
-    <aside className="panel no-print flex h-full w-[264px] shrink-0 flex-col overflow-hidden">
-      {/* 品牌头。用 accent 小方点 + 字重对比建立识别度——
-          旧版只有两行同色文字，和列表项混在一起分不出"这是标题区"。 */}
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-3">
+    <aside className="rail no-print flex h-full w-[264px] shrink-0 flex-col overflow-hidden">
+      {/* 品牌头：accent 图标 + 两行文字。图标做"内发光 + 上高光"，
+          比纯色块更像一枚有厚度的标记。 */}
+      <div className="flex items-center justify-between gap-2 px-3.5 py-3.5">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-accent-soft text-accent"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px]
+                       border border-accent/25 bg-gradient-to-b from-accent/20 to-accent/[0.04]
+                       text-accent shadow-[inset_0_1px_0_rgba(255,255,255,.09)]"
             aria-hidden="true"
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path
                 d="M12 3 4.5 6.5v5c0 4.2 3.1 7.9 7.5 9.5 4.4-1.6 7.5-5.3 7.5-9.5v-5L12 3Z"
                 stroke="currentColor"
@@ -43,6 +49,9 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
             </svg>
           </span>
           <div className="min-w-0">
+            {/* 用 h2 而不是 h1：页面主标题是主列里的"当前会话"
+                （App.tsx）。一页只能有一个 h1，两个平级标题会让
+                屏幕阅读器的文档大纲读起来是"两个并列的东西"。 */}
             <h2 className="truncate text-sm font-semibold tracking-tight text-fg">Attest 质证</h2>
             <p className="truncate text-2xs text-fg-subtle">逐句质证的调研工作台</p>
           </div>
@@ -50,19 +59,33 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
         <button
           type="button"
           onClick={onNew}
-          className="btn-ghost !px-2 !py-1.5"
+          className="btn-icon text-fg-muted hover:text-fg"
           aria-label="新建会话"
           title="新建会话"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
             <path d="M12 5v14M5 12h14" />
           </svg>
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
+      {/* 分组标题：给列表一个"从哪开始"的起点，否则会话项直接贴着品牌区 */}
+      <p className="px-4 pb-1.5 pt-0.5 text-2xs font-medium uppercase tracking-wider text-fg-subtle/80">
+        会话
+      </p>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {loading && sessions.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-fg-subtle">加载中…</p>
+          <ListSkeleton />
         ) : sessions.length === 0 ? (
           <div className="px-3 py-8 text-center">
             <p className="text-xs font-medium text-fg-muted">还没有会话</p>
@@ -74,27 +97,32 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
           </div>
         ) : (
           <ul className="space-y-0.5">
-            {sessions.map((s) => {
+            {sessions.map((s, i) => {
               const meta = STATUS_META[s.status];
               const active = s.thread_id === activeId;
               return (
                 <li key={s.thread_id}>
-                  {/* 选中态用"左侧 2px 色条 + 抬升底色"两个信号，
-                      而不是只换背景色——只换底色在暗色里几乎看不出来。 */}
+                  {/* 选中态用"左侧渐变竖条 + 抬升底色"两个信号，而不是只换背景色——
+                      只换底色在暗色里几乎看不出来。竖条用渐变（上实下虚）与
+                      报告正文 h2 的左侧标记同一套语言，全站"当前项"看着像一路的。
+
+                      逐项 stagger：列表出现时有从下往上的节奏，
+                      比整块一起闪现更像"内容被加载进来"。上限 8 项，
+                      否则长列表末尾要等一秒多才出现。 */}
                   <button
                     type="button"
                     onClick={() => onSelect(s.thread_id)}
                     aria-current={active ? "true" : undefined}
-                    className={`group relative w-full cursor-pointer rounded-control py-2 pl-3.5 pr-2.5 text-left
-                                transition-colors duration-fast ${
-                                  active
-                                    ? "bg-elevated"
-                                    : "hover:bg-elevated/50"
+                    style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}
+                    className={`group relative w-full animate-fade-up cursor-pointer rounded-control
+                                py-2 pl-3.5 pr-2.5 text-left transition-colors duration-fast ${
+                                  active ? "bg-elevated" : "hover:bg-elevated/50"
                                 }`}
                   >
                     {active && (
                       <span
-                        className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent"
+                        className="absolute bottom-2 left-0 top-2 w-[2px] rounded-pill
+                                   bg-gradient-to-b from-accent to-accent/20"
                         aria-hidden="true"
                       />
                     )}
@@ -116,9 +144,11 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
                         </p>
                         <p className="mt-1 flex items-center gap-1.5 text-2xs text-fg-subtle">
                           <span>{meta.label}</span>
-                          <span aria-hidden="true">·</span>
-                          <span className="truncate font-mono opacity-80">
-                            {s.thread_id.slice(0, 12)}
+                          <span aria-hidden="true" className="text-fg-subtle/50">
+                            ·
+                          </span>
+                          <span className="truncate font-mono opacity-75">
+                            {s.thread_id.slice(0, 10)}
                           </span>
                         </p>
                       </div>
@@ -131,8 +161,8 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
         )}
       </div>
 
-      {/* 底部图例：改成"点 + 文字"横排，比旧版一句话更省高度、更好扫读 */}
-      <div className="border-t border-border px-3.5 py-2.5">
+      {/* 底部图例：点 + 文字横排。用分隔线跟列表隔开，避免图例被读成会话项 */}
+      <div className="border-t border-border/60 px-3.5 py-2.5">
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-fg-subtle">
           {(
             [
@@ -150,5 +180,30 @@ export function Sidebar({ sessions, activeId, onSelect, onNew, loading }: Props)
         </ul>
       </div>
     </aside>
+  );
+}
+
+/**
+ * 加载骨架屏。
+ *
+ * 比"加载中…"这行字更好的地方不在于好看：**它预先占住了最终布局的位置**，
+ * 列表回来时不会整块往下跳（CLS）。骨架本身带 shimmer，也明确传达"在拿数据"。
+ */
+function ListSkeleton() {
+  return (
+    <ul className="space-y-1.5 px-1 py-1" aria-hidden="true">
+      {[0.72, 0.55, 0.64, 0.48].map((w, i) => (
+        <li key={i} className="flex items-start gap-2 px-2.5 py-2">
+          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-muted" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <span
+              className="skeleton block h-2.5 rounded-pill"
+              style={{ width: `${w * 100}%` }}
+            />
+            <span className="skeleton block h-2 w-16 rounded-pill" />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

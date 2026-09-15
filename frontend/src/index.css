@@ -21,9 +21,40 @@
     @apply bg-bg text-fg font-sans antialiased;
     font-size: 14px;
     line-height: 1.6;
+    /**
+     * T9.3 · 顶部氛围光。
+     *
+     * 纯平色的大面积暗底会显得"死"（尤其 2K 屏，整屏是一块均匀色）。
+     * 两道**极低 alpha**（0.06 / 0.045）的冷色径向光只铺在顶部，给出：
+     *   ① 暗示光源在上方——后面的 inset 高光描边、投影方向才自洽；
+     *   ② 顶部与底部产生极轻微的明暗差，页面有了"纵深"而不是一块色板。
+     * 刻意用**冷白蓝**而不是 accent 绿：绿色在本项目承载「核验通过」语义，
+     * 拿它做背景光会让语义变糊。
+     * ⚠️ 打印时必须显式清掉（见文件末尾 @media print）。
+     */
+    background-image:
+      radial-gradient(1100px 520px at 20% -10%, rgba(150, 180, 255, 0.06), transparent 60%),
+      radial-gradient(860px 430px at 88% -8%, rgba(120, 165, 225, 0.045), transparent 55%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     /* 暗色下细字容易"发糊"，这两个属性让字形边缘更干净（Windows 上尤其明显） */
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+  }
+
+  /**
+   * 数字一律等宽对齐。
+   *
+   * 这是数据面板"专业感"最廉价也最有效的一条：默认比例字体下
+   * `1` 比 `8` 窄，成本 / token / 耗时在每秒刷新时会**左右抖动**，
+   * 看起来像界面在晃。`tabular-nums` 让所有数字占同一宽度。
+   * 顺带开 `slashed-zero`——编号里有 0（`[WEB1-4-10]`），斜线零能跟字母 O 分开。
+   */
+  .font-mono,
+  code,
+  kbd,
+  pre {
+    font-variant-numeric: tabular-nums slashed-zero;
   }
 
   /* 选中态：默认的蓝底在有语义色的界面里很跳，改用 accent 低饱和 */
@@ -76,11 +107,26 @@
   /* ---------------------------------------------------------------- 容器 */
 
   /**
-   * `.panel`：内容面板。用 shadow-card（含 inset 高光）而不是纯 border 来勾边——
-   * 暗色界面里"内描边高光"是让卡片立起来的关键，单靠边框会显得平。
+   * `.panel`：**全屏唯一的"纸面"**（主内容区）。
+   *
+   * T9.3 之前侧栏 / 主区 / 右栏都用它，三者等重 → 观感是"三个盒子"，没有主次。
+   * 现在只有承载内容的那块用它；侧栏与右栏改用 `.rail`（见下），
+   * 于是"哪块是主体"在余光里就能判断出来。
    */
   .panel {
-    @apply rounded-card border border-border bg-surface shadow-card;
+    @apply rounded-panel border border-border bg-surface shadow-card;
+  }
+
+  /**
+   * `.rail`：侧栏 / 右栏的容器。
+   *
+   * 与 `.panel` 的差别只有两点，但正是这两点让中间那块浮起来：
+   *   ① 底色是 `rail`（只比页面底亮一点点，几乎看不出边界，但滚动时能定位区域）；
+   *   ② 边框降到 `border/50`——不是"没有边界"，而是"边界不该跟内容抢注意力"。
+   * 换句话说：rail 是背景层，panel 是内容层。
+   */
+  .rail {
+    @apply rounded-panel border border-border/50 bg-rail;
   }
 
   /** 更深一层的容器（抽屉、模态、浮层） */
@@ -97,6 +143,28 @@
     @apply h-px w-full bg-border;
   }
 
+  /**
+   * 两端渐隐的分隔线。
+   *
+   * 硬边 1px 横贯整宽是"表格感"的来源；两端淡出后它读起来像"呼吸间隔"，
+   * 而不是又一条要把界面切开的线。用于面板内部的分组，不用于面板边界。
+   */
+  .divider-fade {
+    @apply h-px w-full;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      theme("colors.border") 18%,
+      theme("colors.border") 82%,
+      transparent
+    );
+  }
+
+  /** 面板头（标题 + 右侧元信息）：统一高度与内距，避免各面板头对不齐 */
+  .panel-head {
+    @apply flex items-center justify-between gap-3 border-b border-border px-4 py-3;
+  }
+
   /* ---------------------------------------------------------------- 控件 */
 
   .btn {
@@ -104,8 +172,18 @@
            rounded-control px-3 py-2 text-sm font-medium
            transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-40;
   }
+  /**
+   * 主按钮：accent 实心。
+   * 加一层极淡的**顶部高光渐变**——纯平色块在暗底上像贴纸，
+   * 有一点上亮下暗的过渡就有了"实体按钮"的质感（这是最轻量的拟物，不夸张）。
+   */
   .btn-primary {
-    @apply btn bg-accent text-[#06240F] hover:bg-accent/90 active:bg-accent/80;
+    @apply btn border border-accent/60 text-[#052E14]
+           bg-gradient-to-b from-[#34D06B] to-[#1FAE4E]
+           shadow-[0_1px_2px_rgba(0,0,0,.4),inset_0_1px_0_rgba(255,255,255,.22)]
+           hover:from-[#3CD972] hover:to-[#22BA55]
+           active:from-[#1FAE4E] active:to-[#189343]
+           active:shadow-[inset_0_2px_4px_rgba(0,0,0,.25)];
   }
   .btn-ghost {
     @apply btn border border-border text-fg-muted hover:border-border-strong
@@ -118,6 +196,10 @@
   .btn-xs {
     @apply !px-2 !py-0.5 !text-2xs;
   }
+  /** 图标按钮：正方形，保证 28×28 的可点面积（纯图标按钮不能靠 glyph 撑大小） */
+  .btn-icon {
+    @apply btn h-7 w-7 shrink-0 !px-0 !py-0;
+  }
 
   .input {
     @apply w-full rounded-control border border-border bg-bg px-3 py-2 text-sm text-fg
@@ -125,6 +207,14 @@
            placeholder:text-fg-subtle
            hover:border-border-strong
            focus:border-accent/60 focus:outline-none;
+  }
+
+  /** 键位提示（kbd）：做出"实体键帽"的下边缘，比一个方框更像键盘 */
+  .kbd {
+    @apply inline-flex min-w-[1.4rem] items-center justify-center rounded-[5px]
+           border border-border bg-elevated px-1 py-px font-mono text-[10px]
+           font-medium text-fg-muted
+           shadow-[0_1px_0_rgba(0,0,0,.35),inset_0_1px_0_rgba(255,255,255,.05)];
   }
 
   /* ---------------------------------------------------------------- 标记 */
@@ -165,35 +255,69 @@
     @apply inline-block h-2 w-2 shrink-0 rounded-full;
   }
 
+  /**
+   * 骨架屏块。
+   *
+   * 用**流光**（shimmer）而不是脉冲闪烁：脉冲是"整体忽明忽暗"，
+   * 盯久了像界面在闪故障；流光有明确方向，读起来是"数据正在流过来"。
+   */
+  .skeleton {
+    @apply bg-muted/70;
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
+
   /* ---------------------------------------------------------------- 报告排版 */
 
   /**
-   * 报告是**用户真正要读的东西**，排版值得单独调（不是和界面控件共用一套比例）：
-   *   - 字号 13.5 → 14px、行高 1.75 → 1.8：中文正文在暗底上需要更宽松的行距；
-   *   - 标题层级用"颜色 + 字重 + 间距"三者区分（旧版只有字号差，扫读时找不到结构）；
-   *   - h2 加左侧竖线：长报告里章节感最强的一个视觉锚点。
+   * 报告是**用户真正要读的东西**，排版单独调（不和界面控件共用一套比例）：
+   *   - 字号 14px、行高 1.85：中文正文在暗底上需要更宽松的行距；
+   *   - 行宽由 ReportView 限制在 ~78ch（阅读舒适区），这里只管纵向节奏；
+   *   - 标题层级用"颜色 + 字重 + 间距 + 左侧标记"四者区分
+   *     （旧版只有字号差，长文里扫读找不到结构）。
    */
   .report-body {
-    @apply text-base leading-[1.8] text-fg;
+    @apply text-base leading-[1.85] text-fg;
   }
   .report-body h1 {
-    @apply mb-4 mt-2 text-xl font-semibold tracking-tight text-fg;
+    @apply mb-5 mt-1 text-2xl font-semibold tracking-tight text-fg;
   }
+  /**
+   * h2 的左侧竖线改成**渐变**（上实下虚）：硬边竖线在长文里像表格边框；
+   * 渐隐之后它读起来是"章节的引导"，而不是又一条分隔。
+   */
   .report-body h2 {
-    @apply mb-3 mt-7 border-l-2 border-accent/50 pl-3 text-lg font-semibold text-fg;
+    @apply relative mb-3 mt-8 pl-3.5 text-xl font-semibold text-fg;
+  }
+  .report-body h2::before {
+    content: "";
+    @apply absolute bottom-1 left-0 top-1 w-[2.5px] rounded-pill;
+    background: linear-gradient(
+      180deg,
+      theme("colors.accent") 0%,
+      theme("colors.accent / 35%") 70%,
+      transparent 100%
+    );
   }
   .report-body h3 {
-    @apply mb-2 mt-5 text-base font-semibold text-fg;
+    @apply mb-2 mt-6 text-base font-semibold text-fg;
   }
+  /** h4 是"小节标签"性质：降为小号 + 次级色 + 字距，跟正文拉开但不当标题用 */
   .report-body h4 {
-    @apply mb-1.5 mt-4 text-sm font-semibold text-fg-muted;
+    @apply mb-1.5 mt-5 text-sm font-semibold uppercase tracking-wide text-fg-muted;
   }
   .report-body p {
-    @apply my-2.5;
+    @apply my-3;
   }
   .report-body ul,
   .report-body ol {
-    @apply my-2.5 space-y-1.5 pl-5;
+    @apply my-3 space-y-1.5 pl-5;
   }
   .report-body ul {
     @apply list-disc marker:text-fg-subtle;
@@ -215,17 +339,17 @@
     @apply rounded-[4px] bg-muted px-1 py-0.5 font-mono text-xs text-accent;
   }
   .report-body pre {
-    @apply my-3 overflow-x-auto rounded-card border border-border bg-bg p-3 font-mono text-xs;
+    @apply my-4 overflow-x-auto rounded-card border border-border bg-bg p-3.5 font-mono text-xs leading-relaxed;
   }
   .report-body pre code {
     @apply bg-transparent p-0 text-fg;
   }
   .report-body blockquote {
-    @apply my-3.5 rounded-r-control border-l-2 border-border-strong bg-elevated/40 py-1.5 pl-3.5
+    @apply my-4 rounded-r-control border-l-2 border-border-strong bg-elevated/40 py-2 pl-4
            text-fg-muted;
   }
   .report-body table {
-    @apply my-4 w-full border-collapse overflow-hidden rounded-card text-xs;
+    @apply my-5 w-full border-collapse overflow-hidden rounded-card text-xs;
   }
   .report-body th,
   .report-body td {
@@ -234,8 +358,13 @@
   .report-body th {
     @apply bg-elevated font-semibold text-fg;
   }
+  /** 表格首列留白略宽：报告里的表多是"项目 | 数值"，首列是标签，值得宽一点 */
+  .report-body th:first-child,
+  .report-body td:first-child {
+    @apply pl-3;
+  }
   .report-body hr {
-    @apply my-6 border-border;
+    @apply my-7 border-border;
   }
   /* 报告里的引用编号统一走 .cite 的观感（markdown 渲染出的裸编号不会带类，
      但块级元素里的编号由 ReportView 单独处理；这里兜底行内 code 形态） */
@@ -274,6 +403,17 @@
   [class*="flex-1"] {
     flex: none !important;
   }
+  /* ⚠️ T9.3 新增：body 上的氛围光必须显式清掉。
+     `background: #fff`（下面的简写）在新浏览器里会重置 background-image，
+     但简写在部分旧版本上只重置颜色通道 —— 不写这一条就可能印出一整片渐变底。 */
+  body {
+    background-image: none !important;
+  }
+  /* T9.3：报告正文的行宽限制在打印时必须解除——纸面宽度由 @page 控制，
+     留着 78ch 会让内容挤在左边半页。 */
+  .report-measure {
+    max-width: none !important;
+  }
 
   /* ③ 隐藏交互控件 */
   .no-print {
@@ -296,7 +436,8 @@
     color: #111 !important;
   }
   .panel,
-  .panel-raised {
+  .panel-raised,
+  .rail {
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
@@ -308,8 +449,13 @@
   .report-body h4 {
     color: #000 !important;
   }
+  /* h2 的左侧标记在纸质稿上换成实色细线（渐变在激光打印机上会打成灰雾） */
   .report-body h2 {
-    border-left-color: #999 !important;
+    border-left: 2px solid #999 !important;
+    padding-left: 0.75rem !important;
+  }
+  .report-body h2::before {
+    display: none !important;
   }
   .report-body a {
     color: #0645ad !important;

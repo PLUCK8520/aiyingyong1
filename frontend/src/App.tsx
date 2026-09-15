@@ -8,6 +8,14 @@
  *     因为报告是**大对象**，走 SSE 既浪费带宽又要处理分片。
  *   - `lastEventIdRef`：重连游标。SSE 用 fetch 手写（因为 /api/chat 是 POST，
  *     原生 EventSource 只支持 GET），所以没有自动重连——自己记游标，断了用它续订。
+ *
+ * **T9.3 · 布局决策（改之前先读这段）**：
+ *   中间这一列是**一张面板**，页眉（会话身份 + 视图切换）、内容区、页脚（输入框）
+ *   都在同一张纸内，靠分隔线分段。旧版是"header 一个 panel + 内容一个 panel +
+ *   输入区一个 panel"三个盒子叠着——加上左右两栏就是五个等重盒子，
+ *   层级彻底消失，观感像贴纸墙而不是工作台。
+ *   与之配套：左右两栏用 `.rail`（背景层），内容视图（Progress / Report / KB）
+ *   **自己不再套 panel**（它们已经在纸上了，再套就是"框里套框"）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -314,7 +322,9 @@ export default function App() {
   const running = status === "running" || busy;
 
   return (
-    <div className="flex h-full gap-3 p-3">
+    /* 外框留白 14px（旧版 12px）：暗色界面里面板与窗口边缘贴太近会显得"挤"，
+       多 2px 就能让整块区域读起来是"浮在窗口里"而不是"撑满窗口"。 */
+    <div className="flex h-full gap-3.5 p-3.5">
       <Sidebar
         sessions={sessions}
         activeId={activeId}
@@ -335,17 +345,18 @@ export default function App() {
         loading={loadingList}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col gap-3">
-        {/* 顶栏：会话身份（左）+ 视图切换（右）。
+      {/* ============================ 主列：一整张纸 ============================ */}
+      <main className="panel flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* 页眉：会话身份（左）+ 视图切换（右）。
             标题用 base 字号而非 sm——它是这一屏的"我在看哪次调研"的唯一标识。 */}
-        <header className="panel no-print flex items-center justify-between gap-4 px-4 py-3">
+        <header className="no-print flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 py-3">
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold tracking-tight text-fg">
               {activeSession?.query || "新会话"}
             </h1>
             <div className="mt-1 flex items-center gap-2 text-2xs text-fg-subtle">
               {activeId ? (
-                <span className="font-mono" title={activeId}>
+                <span className="truncate font-mono" title={activeId}>
                   {activeId}
                 </span>
               ) : (
@@ -360,10 +371,12 @@ export default function App() {
             </div>
           </div>
 
-          {/* 视图切换：选中项带边框 + 抬升底色（不只是变色），
-              让"当前在哪一屏"在余光里也能看出来。 */}
+          {/* 视图切换（segmented）：槽内嵌 + 选中滑块抬起。
+              选中态用"抬升底色 + 投影"两个信号，而不只是变个色——
+              暗色里单靠变色，余光扫不到"当前在哪一屏"。 */}
           <nav
-            className="flex shrink-0 items-center gap-0.5 rounded-control border border-border bg-bg/60 p-0.5"
+            className="flex shrink-0 items-center gap-0.5 rounded-control border border-border/70
+                       bg-bg/70 p-[3px]"
             aria-label="视图切换"
           >
             {(["progress", "report", "kb"] as Tab[]).map((t) => (
@@ -375,8 +388,8 @@ export default function App() {
                 className={`cursor-pointer rounded-[6px] px-3 py-1.5 text-xs font-medium
                             transition-colors duration-fast ${
                               tab === t
-                                ? "bg-elevated text-fg shadow-card"
-                                : "text-fg-muted hover:bg-elevated/60 hover:text-fg"
+                                ? "bg-elevated text-fg shadow-segmented"
+                                : "text-fg-muted hover:text-fg"
                             }`}
               >
                 {TAB_LABEL[t]}
@@ -385,19 +398,23 @@ export default function App() {
           </nav>
         </header>
 
+        {/* 错误条：纸内的一段（不圆角、不描边，只跟上下内容用线分开），
+            否则它自己又成了一个盒子，跟前后的内容层级打架。 */}
         {error && (
           <div
             role="alert"
-            className="status-bar no-print animate-fade-in border-danger/40 bg-danger-soft/60"
+            className="no-print flex shrink-0 animate-fade-in items-start gap-2.5 border-b
+                       border-danger/30 bg-danger-soft/40 px-4 py-2.5"
           >
             <span className="mt-1.5 dot bg-danger" aria-hidden="true" />
-            <p className="flex-1 text-fg">{error}</p>
+            <p className="flex-1 text-xs leading-relaxed text-fg">{error}</p>
             <button type="button" className="btn-ghost btn-xs" onClick={() => setError(null)}>
               关闭
             </button>
           </div>
         )}
 
+        {/* 内容区。三个视图**自己不再套 panel**（它们已经在这张纸上了）。 */}
         <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {tab === "kb" ? (
             /* 知识库与会话无关（是全局语料池），所以放在最前面判定——
@@ -420,9 +437,15 @@ export default function App() {
           )}
         </div>
 
-        {/* 输入区：把"提示 + 快捷键"做进来。旧版只有一个 placeholder，
-            用户不知道可以 Ctrl/⌘+Enter 直接提交。 */}
-        <div className="panel no-print p-3">
+        {/* 页脚：输入区。把"快捷键 + 落盘位置"提示做进来——
+            旧版只有一个 placeholder，用户不知道可以 Ctrl/⌘+Enter 直接提交。 */}
+        <form
+          className="no-print flex shrink-0 flex-col gap-2 border-t border-border px-3.5 py-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void startNew();
+          }}
+        >
           <div className="flex items-end gap-2">
             <div className="min-w-0 flex-1">
               <label htmlFor="q" className="sr-only">
@@ -445,14 +468,13 @@ export default function App() {
               />
             </div>
             <button
-              type="button"
+              type="submit"
               className="btn-primary mb-0.5 shrink-0"
-              onClick={() => void startNew()}
               disabled={!query.trim() || submitting || running}
             >
               {submitting || running ? (
                 <>
-                  <span className="dot animate-breathe bg-[#06240F]" aria-hidden="true" />
+                  <span className="dot animate-breathe bg-black/45" aria-hidden="true" />
                   运行中
                 </>
               ) : (
@@ -460,16 +482,16 @@ export default function App() {
               )}
             </button>
           </div>
-          <p className="mt-2 flex items-center gap-1.5 px-0.5 text-2xs text-fg-subtle">
-            <kbd className="rounded border border-border bg-bg px-1 font-mono">Ctrl</kbd>
-            <span>+</span>
-            <kbd className="rounded border border-border bg-bg px-1 font-mono">Enter</kbd>
-            <span>提交 · 报告会自动落盘到 data/reports/</span>
+          <p className="flex items-center gap-1.5 text-2xs text-fg-subtle">
+            <kbd className="kbd">Ctrl</kbd>
+            <span className="text-fg-subtle/70">+</span>
+            <kbd className="kbd">Enter</kbd>
+            <span>提交 · 报告自动落盘到 data/reports/</span>
           </p>
-        </div>
+        </form>
       </main>
 
-      <div className="no-print hidden w-[320px] shrink-0 xl:block">
+      <div className="no-print hidden w-[316px] shrink-0 xl:block">
         <TimelinePanel timeline={timeline} cost={cost} tokens={tokens} running={running} />
       </div>
 
@@ -504,15 +526,25 @@ function EmptyReport({ status }: { status: SessionStatus }) {
         ? "调研进行中——完成后报告会自动出现在这里。"
         : "在下方输入问题并「开始调研」，完成后报告会出现在这里。";
   return (
-    <div className="panel flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-pill border border-border bg-elevated text-fg-subtle">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-8 text-center">
+      {/* 空态的图标容器用"内凹"而不是"浮现"：它不该比内容更抢眼 */}
+      <div
+        className="mb-1 flex h-11 w-11 items-center justify-center rounded-panel border
+                   border-border/70 bg-bg/60 text-fg-subtle
+                   shadow-[inset_0_1px_2px_rgba(0,0,0,.35)]"
+      >
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v13A1.5 1.5 0 0 1 14.5 20h-9A1.5 1.5 0 0 1 4 18.5v-13Z"
             stroke="currentColor"
             strokeWidth="1.5"
           />
-          <path d="M7.5 8h5M7.5 11h5M7.5 14h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <path
+            d="M7.5 8h5M7.5 11h5M7.5 14h3"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
           <path d="M18 8v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       </div>
