@@ -109,13 +109,25 @@ def _detect_conflicts(
     )
     if not pairs:
         return [], None
-    resp = ctx.gateway.chat(
-        build_conflict_messages(objective, evidence, pairs_as_ids(pairs)),
-        task="conflict",
-        response_model=ConflictResult,
-        temperature=0.0,
-        fuse_level=fuse_level,  # T4.3：轻任务，熔断 L1 起可切便宜档
-    )
+    try:
+        resp = ctx.gateway.chat(
+            build_conflict_messages(objective, evidence, pairs_as_ids(pairs)),
+            task="conflict",
+            response_model=ConflictResult,
+            temperature=0.0,
+            fuse_level=fuse_level,  # T4.3：轻任务，熔断 L1 起可切便宜档
+        )
+    except Exception as exc:  # noqa: BLE001 - 矛盾检测是附加能力，失败不该拖垮本轮
+        # 与判别同理（见 `_degrade_on_failure`）：报告必须产出。
+        # 矛盾检测失败只是"本次没有争议章节"，不影响正文与引用核验。
+        ctx.trace.emit(
+            "conflict_failed",
+            node=NODE,
+            n_pairs=len(pairs),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        log.warning(f"[judge] 矛盾检测失败（已重试耗尽），跳过冲突章节：{type(exc).__name__}: {exc}")
+        return [], None
     result: ConflictResult = resp.parsed  # type: ignore[assignment]
     return list(result.conflicts), resp
 
@@ -273,6 +285,61 @@ def _dedupe_conflicts(found: list[Conflict], existing: list[Conflict]) -> list[C
     return out
 
 
+def _degrade_on_failure(
+    ctx: NodeContext,
+    state: dict[str, Any],
+    exc: Exception,
+    *,
+    stage: str,
+    sub_questions: list[str],
+    all_evidence: list[Any],
+    cur_round: int,
+    n_sent: int,
+) -> dict[str, Any]:
+    """判别/矛盾检测**失败时的降级返回**——不杀进程。
+
+    为什么必须降级（2026-09-15 实测）：`glm-4.5-flash`（免费档推理模型）在判 65 条证据时
+    连续读超时（每次 240s）+ 429，网关重试耗尽后抛 `RuntimeError`，
+    于是**整轮调研在跑了 23 分钟后整体失败、零产出**。
+
+    这与项目的不变式直接冲突——`docs/开发任务清单.md` 写着
+    「**熔断只降级不杀进程：不变式是报告必须产出**」。而本节点是这条不变式里
+    唯一的漏网之鱼：analyst 有拒编兜底、auditor 的重写有 try/except，
+    只有这里让异常一路抛到 CLI。
+
+    降级后的语义（**必须可观测，不是静默吞掉**）：
+      - 不新增 `judgments`（保留 state 里已有的，旧判据继续有效）；
+      - `gaps` 追加一条说明，读者能看出"本轮判别缺失"；
+      - trace 打 `judge_failed`、日志 ERROR；
+      - 后续 `analyst.assess_evidence` 在"无判别结果"时**已有**退化分支
+        （判据改为 `score > 0`＝检索真实命中），所以仍会出报告，且这个判据本身是诚实的
+        （它只保证"证据真的被检索命中过"，不假装做过相关性判别）。
+    """
+    ctx.trace.emit(
+        "judge_failed",
+        node=NODE,
+        stage=stage,
+        round=cur_round,
+        n_sent=n_sent,
+        error=f"{type(exc).__name__}: {exc}",
+    )
+    log.error(
+        f"[judge] {stage} 失败（已重试耗尽），**降级继续**以保证报告产出："
+        f"{type(exc).__name__}: {exc}"
+    )
+
+    existing = list(state.get("judgments") or [])
+    # 缺口按"已有判别能覆盖多少"重算，再附一条判别失败的说明（放最前，读者先看到）
+    keep_ids = {
+        normalize_citation_id(j.citation_id) for j in existing if j.relevance >= MIN_RELEVANCE
+    }
+    covered = {e.sub_question for e in all_evidence if e.citation_id in keep_ids}
+    gaps = [f"本轮证据判别未完成（{stage} 调用失败，已降级为按检索命中判定）"]
+    gaps += merge_gaps([], sub_questions, covered)
+    log.node(TAG, NODE, "降级完成", reason=f"{stage} 失败", judgments=len(existing))
+    return {"judgments": [], "gaps": _new_gaps_only(state, gaps)}
+
+
 def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     plan = state.get("plan") or {}
     objective = plan.get("objective", "")
@@ -307,14 +374,24 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         TAG, NODE, "开始", evidence=len(all_evidence), new_evidence=len(new_evidence), round=cur_round
     )
 
-    resp = ctx.gateway.chat(
-        build_judge_messages(objective, sub_questions, new_evidence),
-        task="judge",
-        response_model=JudgeResult,
-        temperature=0.0,
-        fuse_level=fuse,
-    )
-    result: JudgeResult = resp.parsed  # type: ignore[assignment]
+    try:
+        resp = ctx.gateway.chat(
+            build_judge_messages(objective, sub_questions, new_evidence),
+            task="judge",
+            response_model=JudgeResult,
+            temperature=0.0,
+            fuse_level=fuse,
+        )
+        result: JudgeResult = resp.parsed  # type: ignore[assignment]
+    except Exception as exc:  # noqa: BLE001 - 判别失败不杀进程（见 _degrade_on_failure 文档串）
+        return _degrade_on_failure(
+            ctx, state, exc,
+            stage="证据判别",
+            sub_questions=sub_questions,
+            all_evidence=all_evidence,
+            cur_round=cur_round,
+            n_sent=len(new_evidence),
+        )
 
     cost = float(state.get("cost_incurred", 0.0) or 0.0) + resp.cost_cny
     toks = int(state.get("tokens_incurred", 0) or 0) + resp.total_tokens
