@@ -66,7 +66,7 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
         className="panel-raised flex max-h-[85vh] w-full max-w-xl animate-rise-in flex-col
                    overflow-hidden"
       >
-        <div className="shrink-0 border-b border-border px-5 py-4">
+        <div className="shrink-0 border-b border-border px-4 py-3.5 sm:px-5 sm:py-4">
           <div className="flex items-center gap-2.5">
             <span
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px]
@@ -93,7 +93,7 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
           </p>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5 sm:px-5 sm:py-4">
           <div className="mb-4">
             <p className="text-2xs font-medium uppercase tracking-wider text-fg-subtle">调研目标</p>
             <p className="mt-1 text-sm leading-relaxed text-fg">
@@ -188,7 +188,7 @@ export function ConfirmModal({ payload, busy, onDecide }: Props) {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3
-                        border-t border-border bg-bg/30 px-5 py-3.5">
+                        border-t border-border bg-bg/30 px-4 py-3.5 sm:px-5 sm:py-3.5">
           <button
             type="button"
             className="btn-ghost !text-danger hover:!border-danger/40 hover:!bg-danger-soft"

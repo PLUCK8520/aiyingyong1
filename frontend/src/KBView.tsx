@@ -127,7 +127,7 @@ export function KBView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/* ------------------------------------------------ 概览 */}
-      <section className="shrink-0 border-b border-border px-6 py-5">
+      <section className="shrink-0 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold tracking-tight text-fg">本地知识库</h2>
@@ -196,7 +196,7 @@ export function KBView() {
         <div
           role="alert"
           className="flex shrink-0 animate-fade-in items-start gap-2.5 border-b border-danger/30
-                     bg-danger-soft/40 px-6 py-2.5"
+                     bg-danger-soft/40 px-4 py-2.5 sm:px-6"
         >
           <span className="mt-1.5 dot bg-danger" aria-hidden="true" />
           <p className="flex-1 text-xs leading-relaxed text-fg">{error}</p>
@@ -206,7 +206,7 @@ export function KBView() {
         </div>
       )}
       {notice && (
-        <div className="flex shrink-0 animate-fade-in items-start gap-2.5 border-b border-accent/25 bg-accent/[0.07] px-6 py-2.5">
+        <div className="flex shrink-0 animate-fade-in items-start gap-2.5 border-b border-accent/25 bg-accent/[0.07] px-4 py-2.5 sm:px-6">
           <span className="mt-1.5 dot bg-accent" aria-hidden="true" />
           <p className="flex-1 text-xs leading-relaxed text-fg">{notice}</p>
           <button type="button" className="btn-ghost btn-xs" onClick={() => setNotice(null)}>
@@ -216,7 +216,7 @@ export function KBView() {
       )}
 
       {/* ------------------------------------------------ 上传 */}
-      <section className="shrink-0 border-b border-border px-6 py-5">
+      <section className="shrink-0 border-b border-border px-4 py-4 sm:px-6 sm:py-5">
         <div
           className={`rounded-panel border border-dashed px-6 py-7 text-center
                       transition-colors duration-fast ${

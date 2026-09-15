@@ -49,7 +49,7 @@ export function ReportView({ markdown, references, sufficiency }: Props) {
       <section className="flex min-h-0 flex-col overflow-hidden">
         <ExportBar markdown={markdown} />
         {refused && sufficiency && <RefusalBanner info={sufficiency} />}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6">
           <div className="report-body report-measure mx-auto max-w-[76ch]">
             {blocks.map((b, i) => (
               <Block key={i} block={b} references={references} onCite={setActive} />
@@ -268,7 +268,7 @@ function RefusalBanner({ info }: { info: EvidenceSufficiency }) {
   const nCov = info.covered_sub_questions?.length ?? 0;
 
   return (
-    <div className="shrink-0 border-b border-warn/25 bg-warn/[0.07] px-6 py-4">
+    <div className="shrink-0 border-b border-warn/25 bg-warn/[0.07] px-4 py-4 sm:px-6">
       <div className="mx-auto flex max-w-[76ch] items-start gap-2.5">
         <span className="mt-1.5 dot bg-warn" aria-hidden="true" />
         <div className="min-w-0 flex-1">

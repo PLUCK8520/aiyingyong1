@@ -21,6 +21,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  fmtCny,
+  fmtTokens,
   STATUS_META,
   streamChat,
   type AnyEvent,
@@ -67,6 +69,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [mockMode, setMockMode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  /** 窄屏（<lg）的会话抽屉开关。宽屏侧栏常驻在流内，此值不生效。 */
+  const [navOpen, setNavOpen] = useState(false);
 
   const lastEventIdRef = useRef(-1);
   const abortRef = useRef<AbortController | null>(null);
@@ -341,15 +345,41 @@ export default function App() {
           setError(null);
           setTab("progress");
           lastEventIdRef.current = -1;
+          // 窄屏：新建后收起抽屉，让用户直接看到主列底部的输入框
+          setNavOpen(false);
         }}
         loading={loadingList}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
       />
 
       {/* ============================ 主列：一整张纸 ============================ */}
       <main className="panel flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* 页眉：会话身份（左）+ 视图切换（右）。
             标题用 base 字号而非 sm——它是这一屏的"我在看哪次调研"的唯一标识。 */}
-        <header className="no-print flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 py-3">
+        <header className="no-print flex shrink-0 items-center gap-2 border-b border-border px-3 py-3 sm:gap-4 sm:px-4">
+          {/* 抽屉开关：只在 lg 以下出现（lg 以上侧栏常驻在流内，不需要入口） */}
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            className="btn-icon -ml-0.5 text-fg-muted hover:text-fg lg:hidden"
+            aria-label="打开会话列表"
+            title="会话列表"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold tracking-tight text-fg">
               {activeSession?.query || "新会话"}
@@ -371,6 +401,17 @@ export default function App() {
             </div>
           </div>
 
+          {/* 紧凑成本：xl 以下右栏不显示，成本必须有别处落脚——
+              否则它在窄屏上是**彻底丢失**，而不是"折叠起来"。 */}
+          <span
+            className="chip-neutral hidden shrink-0 font-mono lg:inline-flex xl:hidden"
+            title="累计费用 · 累计 token（宽屏时右栏有完整面板）"
+          >
+            {fmtCny(cost)}
+            <span className="text-fg-subtle/60">·</span>
+            {fmtTokens(tokens)}
+          </span>
+
           {/* 视图切换（segmented）：槽内嵌 + 选中滑块抬起。
               选中态用"抬升底色 + 投影"两个信号，而不只是变个色——
               暗色里单靠变色，余光扫不到"当前在哪一屏"。 */}
@@ -385,8 +426,8 @@ export default function App() {
                 type="button"
                 onClick={() => setTab(t)}
                 aria-current={tab === t ? "page" : undefined}
-                className={`cursor-pointer rounded-[6px] px-3 py-1.5 text-xs font-medium
-                            transition-colors duration-fast ${
+                className={`cursor-pointer rounded-[6px] px-2.5 py-1.5 text-xs font-medium
+                            transition-colors duration-fast sm:px-3 ${
                               tab === t
                                 ? "bg-elevated text-fg shadow-segmented"
                                 : "text-fg-muted hover:text-fg"
