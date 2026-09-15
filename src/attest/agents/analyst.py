@@ -249,6 +249,61 @@ def truncate_topk(
     return [evidence[i] for i in sorted(ranked[:k])]
 
 
+def build_llm_failure_report(
+    objective: str,
+    selected: list[Evidence],
+    exc: Exception,
+    *,
+    reason_hint: str = "",
+) -> str:
+    """**成文调用失败**时的确定性产物（不调模型）：如实交代 + 附上已检索到的证据清单。
+
+    为什么不让整轮直接失败：走到这一步时，检索与判别**已经真实跑过**（可能花了几分钟），
+    那些证据是真实、有用的——把它们交出去远好于让用户两手空空。
+    同时**绝不伪造正文**：这里只有失败说明与证据清单，**没有任何结论**。
+
+    刻意**不带引用编号**：编号是"正文结论"的引用契约，这里没有正文；
+    不带编号能让下游 `citation_check.no_citations` 如实为真，
+    `auditor` 据此加上「未通过逐句回查」横幅——那是准确的（这份产物确实没有可回查的正文）。
+    """
+    n = len(selected)
+    lines: list[str] = [
+        f"# {objective} —— 成文失败",
+        "",
+        "## 说明",
+        "",
+        f"本轮**已检索并筛选出 {n} 条可用证据**，但**撰写报告的模型调用失败**"
+        "（已按网关策略重试，仍未成功），因此这次**没有产出正文**。",
+        "",
+        "⚠️ 这**不是「证据不足」**，而是模型服务侧的故障——证据是有的，只是没写成文。",
+        "",
+        "## 失败原因（如实记录）",
+        "",
+        f"`{type(exc).__name__}: {exc}`",
+    ]
+    if reason_hint:
+        lines += ["", f"补充：{reason_hint}"]
+    lines += ["", f"## 已检索到的证据（{n} 条，可直接查阅）", ""]
+    if selected:
+        for e in selected[:40]:
+            url = e.url or "（无链接）"
+            lines.append(f"- {e.title or '（无标题）'} — {url} — 子问题：{e.sub_question}")
+        if n > 40:
+            lines.append(f"- （其余 {n - 40} 条略）")
+    else:
+        lines.append("- （无）")
+    lines += [
+        "",
+        "## 建议的下一步",
+        "",
+        "1. **直接重跑一次**：模型服务侧的超时/限流多数是瞬时的，重跑常能成功。",
+        "2. 若反复失败，检查 `.env` 里的模型档位与超时（`ATTEST_LLM_TIMEOUT`）；"
+        "推理型模型（如 `glm-4.5-flash`）在大证据量下容易超时，可换回非推理的 Flash 档。",
+        "3. 上面列出的证据链接可以先手动查看着用——它们是真的。",
+    ]
+    return "\n".join(lines)
+
+
 def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
     plan = state.get("plan") or {}
     objective = plan.get("objective", "调研报告")
@@ -347,7 +402,33 @@ def run(state: dict[str, Any], ctx: NodeContext) -> dict[str, Any]:
         messages = build_analyst_messages(
             objective, outlines, selected, conflicts, profile_block=profile_block(state)
         )
-    resp = ctx.gateway.chat(messages, task="analyst", temperature=0.3, fuse_level=fuse)
+    try:
+        resp = ctx.gateway.chat(messages, task="analyst", temperature=0.3, fuse_level=fuse)
+    except Exception as exc:  # noqa: BLE001 - 成文失败不杀进程（与 T7.10 拒编同理：报告必须产出）
+        # 走到这里说明检索与判别都已真实跑过，前面的工作不该因一次模型故障全部作废。
+        ctx.trace.emit(
+            "analyst_failed",
+            node=NODE,
+            evidence=len(selected),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        log.error(
+            f"[analyst] 成文调用失败（已重试耗尽），产出「成文失败页」+ 证据清单："
+            f"{type(exc).__name__}: {exc}"
+        )
+        report = build_llm_failure_report(objective, selected, exc)
+        # 索引基于全量证据建（与正常路径一致）：失败页不含编号，
+        # 故 `no_citations` 如实为真 → auditor 加「未通过逐句回查」横幅（准确）。
+        _index = CitationIndex.from_evidence(evidence)
+        final_report, refs, check = finalize(report, _index)
+        log.node(TAG, NODE, "降级完成", chars=len(final_report), failure=True)
+        return {
+            "report": final_report,
+            "reference_list": refs,
+            "citation_check": check,
+            "evidence_sufficiency": suff,
+            "model_tier": "failed",
+        }
 
     # 索引基于**全量证据**建：筛选只影响"写什么"，不影响"能不能回查"
     index = CitationIndex.from_evidence(evidence)
